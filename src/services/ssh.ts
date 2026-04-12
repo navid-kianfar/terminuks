@@ -27,23 +27,53 @@ class SSHService {
         host,
       });
     } catch (error: unknown) {
+      // Check for host verification requirement
+      const errObj = error as any;
       if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        error.code === 'HOST_VERIFICATION_REQUIRED'
+        errObj &&
+        typeof errObj === 'object' &&
+        (errObj.code === 'HOST_VERIFICATION_REQUIRED' || 
+         (errObj.message && errObj.message.includes('HOST_VERIFICATION_REQUIRED')))
       ) {
         const trustError = new Error(
           'The authenticity of this host cannot be established.'
         ) as SSHHostVerificationError;
         trustError.code = 'HOST_VERIFICATION_REQUIRED';
-        trustError.fingerprint = String((error as { fingerprint?: string }).fingerprint || '');
-        trustError.host = String((error as { host?: string }).host || host.address);
-        trustError.port = Number((error as { port?: number }).port || host.port);
+        trustError.fingerprint = String(errObj.fingerprint || '');
+        trustError.host = String(errObj.host || host.address);
+        trustError.port = Number(errObj.port || host.port);
         throw trustError;
       }
 
-      const message = error instanceof Error ? error.message : 'Unknown SSH connection error';
+      let message = 'Unknown SSH connection error';
+      if (error instanceof Error) {
+        message = error.message;
+      } else if (typeof error === 'string') {
+        message = error;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        message = String((error as any).message);
+      }
+
+      // Handle Electron IPC prefix and [object Object] cases
+      const cleanedMessage = message
+        .replace(/^Error invoking remote method 'ssh:connect':\s*/, '')
+        .replace(/^Error invoking remote method 'ssh:connect':\s*/, ''); // double check for nesting
+      
+      if (cleanedMessage === '[object Object]' || !cleanedMessage) {
+        try {
+          const stringified = JSON.stringify(error);
+          if (stringified !== '{}' && stringified !== 'null') {
+            message = stringified;
+          } else {
+            message = 'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
+          }
+        } catch {
+          message = 'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
+        }
+      } else {
+        message = cleanedMessage;
+      }
+
       throw new Error(message);
     }
   }

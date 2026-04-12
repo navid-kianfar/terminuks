@@ -24,6 +24,12 @@ mac:
   icon: assets/icon.png
   category: public.app-category.developer-tools
   artifactName: Terminuks-${version}-mac-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.inherit.plist
+  notarize:
+    teamId: "${APPLE_TEAM_ID}"
 linux:
   target:
     - AppImage

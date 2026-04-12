@@ -118,21 +118,26 @@ ipcMain.handle('ssh:connect', async (_, hostConfig: any) => {
     });
 
     client.on('error', (err: Error) => {
+      console.error(`[SSH] Connection error for ${hostConfig.address}:`, err);
       connection.connected = false;
       if (pendingFingerprint) {
-        reject({
-          code: 'HOST_VERIFICATION_REQUIRED',
-          message: `The authenticity of ${hostConfig.address} can't be established.`,
-          fingerprint: pendingFingerprint,
-          host: hostConfig.address,
-          port: hostConfig.port || 22,
-        });
+        const verificationError = new Error(`The authenticity of ${hostConfig.address} can't be established.`);
+        (verificationError as any).code = 'HOST_VERIFICATION_REQUIRED';
+        (verificationError as any).fingerprint = pendingFingerprint;
+        (verificationError as any).host = hostConfig.address;
+        (verificationError as any).port = hostConfig.port || 22;
+        reject(verificationError);
         return;
       }
       reject(err);
     });
 
-    client.connect(config);
+    try {
+      client.connect(config);
+    } catch (err) {
+      console.error(`[SSH] Synchronous connection failure for ${hostConfig.address}:`, err);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 });
 
