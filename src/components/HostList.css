@@ -1,0 +1,219 @@
+.host-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 8px 4px;
+}
+
+.host-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 8px 0;
+  padding: 24px 18px;
+  border: 1px dashed var(--border-color);
+  border-radius: 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-tertiary) 72%, transparent), transparent);
+  text-align: center;
+}
+
+.host-list-empty svg {
+  width: 42px;
+  height: 42px;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.host-list-empty p {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.host-list-empty span {
+  max-width: 18ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.host-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.host-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  border-radius: 8px;
+}
+
+.host-group-header:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.host-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+  user-select: none;
+  border: 1px solid color-mix(in srgb, var(--border-color) 30%, transparent);
+  background: color-mix(in srgb, var(--bg-tertiary) 38%, transparent);
+}
+
+.host-item.indented {
+  margin-left: 20px;
+}
+
+.host-item:hover {
+  background-color: color-mix(in srgb, var(--bg-hover) 78%, transparent);
+  border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.host-item.active {
+  background-color: var(--bg-tertiary);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-color));
+}
+
+.host-item-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.host-item-icon {
+  width: 28px;
+  height: 28px;
+  background-color: var(--bg-tertiary);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.host-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s;
+}
+
+.host-item:hover .host-avatar {
+  transform: scale(1.1);
+}
+
+.host-item.active .host-item-icon {
+  background-color: var(--accent);
+  color: white;
+}
+
+.host-item-info {
+  min-width: 0;
+}
+
+.host-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.host-item-actions {
+  display: flex;
+  align-items: center;
+  position: relative;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+
+.host-item:hover .host-item-actions {
+  opacity: 1;
+}
+
+.host-item-menu {
+  background: transparent;
+  color: var(--text-tertiary);
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.host-item-menu:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.collapsed-list {
+  padding: 8px 0;
+  gap: 8px;
+  align-items: center;
+}
+
+.collapsed-list .host-group {
+  width: 100%;
+  align-items: center;
+}
+
+.collapsed-list .host-item {
+  justify-content: center;
+  padding: 10px 0;
+  border-radius: 0;
+}
+
+.collapsed-list .host-item-content {
+  justify-content: center;
+  width: 100%;
+}
+
+.host-dialog-copy {
+  padding: 18px;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.host-dialog-copy code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: 'Fira Code', monospace;
+  font-size: 14px;
+}

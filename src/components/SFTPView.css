@@ -1,0 +1,371 @@
+.sftp-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.sftp-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.sftp-toolbar-title span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.sftp-toolbar-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.sftp-toolbar-actions button,
+.pane-header-actions button,
+.sftp-editor-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.sftp-panes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+
+.sftp-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sftp-pane + .sftp-pane {
+  border-left: 2px solid var(--border-color); /* Stronger middle border */
+}
+
+.pane-path-bar {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sftp-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pane-eyebrow {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.pane-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sftp-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
+}
+
+.sftp-pane-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-tertiary);
+}
+
+.sftp-pane-filter input {
+  width: 100%;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+}
+
+.pane-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  text-align: left;
+}
+
+.pane-item:hover,
+.pane-item.active {
+  background: rgba(61, 182, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.pane-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-item-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sftp-pane-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sftp-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sftp-banner.success {
+  background-color: rgba(76, 175, 80, 0.12);
+  color: #92df95;
+}
+
+.sftp-banner.error {
+  background-color: rgba(244, 67, 54, 0.12);
+  color: #ff8f87;
+}
+
+.sftp-banner button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background-color: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+}
+
+.sftp-empty-state,
+.workspace-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.workspace-empty strong {
+  color: var(--text-primary);
+}
+
+.sftp-inline-picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.sftp-skeleton-list {
+  padding: 2px;
+}
+
+.sftp-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-tertiary));
+}
+
+.sftp-skeleton-icon,
+.sftp-skeleton-line,
+.sftp-skeleton-meta {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text-tertiary) 18%, var(--bg-tertiary));
+}
+
+.sftp-skeleton-icon::after,
+.sftp-skeleton-line::after,
+.sftp-skeleton-meta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-secondary) 22%, transparent),
+    transparent
+  );
+  animation: sftp-shimmer 1.3s infinite;
+}
+
+.sftp-skeleton-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 6px;
+  flex: 0 0 16px;
+}
+
+.sftp-skeleton-line {
+  height: 12px;
+  flex: 1;
+  border-radius: 999px;
+}
+
+.sftp-skeleton-meta {
+  width: 56px;
+  height: 12px;
+  border-radius: 999px;
+  flex: 0 0 56px;
+}
+
+.sftp-context-menu {
+  position: fixed;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  z-index: 1600;
+  backdrop-filter: blur(8px);
+}
+
+.sftp-context-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.sftp-context-item:hover {
+  background: rgba(61, 182, 255, 0.1);
+}
+
+.sftp-context-item.danger {
+  color: var(--error);
+}
+
+.sftp-editor-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sftp-editor-modal .cm-editor,
+.sftp-editor-modal .cm-theme {
+  height: 68vh;
+}
+
+.sftp-dialog-body input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  margin-bottom: 14px;
+}
+
+.sftp-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sftp-dialog-cancel,
+.sftp-dialog-primary,
+.sftp-dialog-danger {
+  padding: 10px 14px;
+  border-radius: 12px;
+  color: var(--text-primary);
+}
+
+.sftp-dialog-cancel {
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sftp-dialog-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+}
+
+.sftp-dialog-danger {
+  background: linear-gradient(135deg, #ff6b7d, #ff4b62);
+}
+
+@media (max-width: 1100px) {
+  .sftp-panes {
+    grid-template-columns: 1fr;
+  }
+
+  .sftp-pane + .sftp-pane {
+    border-left: none;
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+@keyframes sftp-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}

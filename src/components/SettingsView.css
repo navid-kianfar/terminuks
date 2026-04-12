@@ -1,0 +1,140 @@
+.settings-shell {
+  min-height: 620px;
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-panel {
+  min-height: 100%;
+}
+
+.settings-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.settings-form-span {
+  grid-column: 1 / -1;
+}
+
+.settings-hosts-list,
+.settings-snippet-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-host-row,
+.settings-snippet-card,
+.settings-toggle-card,
+.settings-empty-card {
+  border-radius: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  padding: 16px;
+}
+
+.settings-host-row,
+.settings-toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-host-meta,
+.settings-snippet-copy,
+.settings-empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-host-meta strong,
+.settings-snippet-copy strong,
+.settings-toggle-card strong,
+.settings-empty-card strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.settings-host-meta span,
+.settings-snippet-copy span,
+.settings-toggle-card span,
+.settings-empty-card span {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.settings-snippet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.settings-snippet-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-snippet-card code {
+  display: block;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  border: 1px solid var(--border-color);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.settings-inline-code {
+  background: color-mix(in srgb, var(--bg-tertiary) 88%, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 2px 8px;
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .settings-shell {
+    min-height: auto;
+  }
+
+  .settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-host-row,
+  .settings-toggle-card,
+  .settings-heading-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-inline-actions {
+    justify-content: flex-start;
+  }
+}

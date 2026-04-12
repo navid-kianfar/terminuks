@@ -1,0 +1,115 @@
+.session-launcher {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(100%, 620px);
+}
+
+.session-launcher-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-tertiary);
+}
+
+.session-launcher-search .ui-input {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.session-launcher-search .ui-input:focus {
+  box-shadow: none;
+}
+
+.session-launcher-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-launcher-results {
+  display: grid;
+  gap: 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.session-launcher-host {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  text-align: left;
+  transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.session-launcher-host:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-primary));
+  transform: translateY(-1px);
+}
+
+.session-launcher-host-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary));
+  color: var(--accent);
+}
+
+.session-launcher-host-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-launcher-host-copy strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.session-launcher-host-copy span,
+.session-launcher-host-action {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.session-launcher-host-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-launcher-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px;
+  border-radius: 18px;
+  border: 1px dashed var(--border-color);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 800px) {
+  .session-launcher-host {
+    grid-template-columns: auto 1fr;
+  }
+
+  .session-launcher-host-action {
+    grid-column: 2;
+  }
+}

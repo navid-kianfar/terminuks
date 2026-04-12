@@ -1,0 +1,94 @@
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+}
+
+.app-dialog-overlay-contained {
+  position: absolute;
+  z-index: 80;
+}
+
+.app-dialog-overlay-contained .app-dialog {
+  width: min(520px, calc(100% - 32px));
+}
+
+.app-dialog-overlay-contained .app-dialog-wide {
+  width: min(1100px, calc(100% - 32px));
+}
+
+.app-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border-radius: 22px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.app-dialog-wide {
+  width: min(1100px, calc(100vw - 32px));
+}
+
+.app-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.app-dialog-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-dialog-header h3 {
+  font-size: 22px;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+
+.app-dialog-header p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  max-width: 48ch;
+}
+
+.app-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-tertiary) 86%, transparent);
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  flex: 0 0 46px;
+}
+
+.app-dialog-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.app-dialog-body {
+  padding: 24px;
+}
+
+.app-dialog-body-flush {
+  padding-top: 18px;
+}
+
+.app-dialog-body-alert {
+  padding: 18px 22px 18px;
+}

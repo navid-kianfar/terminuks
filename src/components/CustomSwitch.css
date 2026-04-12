@@ -1,0 +1,27 @@
+.custom-switch {
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 3px;
+  position: relative;
+  transition: background 0.18s ease;
+}
+
+.custom-switch.checked {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+}
+
+.custom-switch-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.18s ease;
+}
+
+.custom-switch.checked .custom-switch-thumb {
+  transform: translateX(18px);
+}
