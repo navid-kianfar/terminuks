@@ -152,7 +152,9 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  store = new EncryptedSqliteStore(path.join(app.getPath('userData'), 'storage', 'terminuks.db.enc'));
+  store = new EncryptedSqliteStore(
+    path.join(app.getPath('userData'), 'storage', 'terminuks.db.enc')
+  );
   await store.init();
   createWindow();
 
@@ -222,3 +224,23 @@ ipcMain.handle('localfs:list', async (_, dirPath: string) => {
 });
 
 ipcMain.handle('localfs:home', async () => os.homedir());
+
+ipcMain.handle('localfs:readFile', async (_, filePath: string) => {
+  return fs.promises.readFile(filePath, 'utf8');
+});
+
+ipcMain.handle('localfs:writeFile', async (_, filePath: string, content: string) => {
+  await fs.promises.writeFile(filePath, content, 'utf8');
+});
+
+ipcMain.handle('localfs:createFile', async (_, filePath: string) => {
+  await fs.promises.writeFile(filePath, '', 'utf8');
+});
+
+ipcMain.handle('localfs:createDirectory', async (_, dirPath: string) => {
+  await fs.promises.mkdir(dirPath, { recursive: true });
+});
+
+ipcMain.handle('localfs:rename', async (_, oldPath: string, newPath: string) => {
+  await fs.promises.rename(oldPath, newPath);
+});

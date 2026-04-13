@@ -11,16 +11,7 @@ import Switch from './ui/switch';
 import Select from './ui/select';
 import AlertDialog from './ui/alert-dialog';
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import {
-  Copy,
-  Edit2,
-  Monitor,
-  Plus,
-  Server,
-  Terminal,
-  Trash2,
-  Wand2,
-} from 'lucide-react';
+import { Copy, Edit2, Monitor, Plus, Server, Terminal, Trash2, Wand2 } from 'lucide-react';
 import { CommandSnippet } from '../types';
 import './SettingsView.css';
 
@@ -41,6 +32,15 @@ const bellOptions = [
   { value: 'visual', label: 'Visual' },
 ] as const;
 
+const fontFamilyOptions = [
+  { value: "'Fira Code', 'Courier New', monospace", label: 'Fira Code' },
+  { value: "'JetBrains Mono', 'Courier New', monospace", label: 'JetBrains Mono' },
+  { value: "'IBM Plex Mono', 'Courier New', monospace", label: 'IBM Plex Mono' },
+  { value: "'SF Mono', 'SFMono-Regular', 'Courier New', monospace", label: 'SF Mono' },
+  { value: "'Cascadia Code', 'Courier New', monospace", label: 'Cascadia Code' },
+  { value: "'Menlo', 'Courier New', monospace", label: 'Menlo' },
+] as const;
+
 const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appearance' }) => {
   const { settings, themes, setTheme, updateSettings } = useTheme();
   const { hosts, deleteHost, duplicateHost } = useHosts();
@@ -50,6 +50,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appe
   const [showSnippetForm, setShowSnippetForm] = useState(false);
   const [hostPendingDelete, setHostPendingDelete] = useState<string | null>(null);
   const [snippetPendingDelete, setSnippetPendingDelete] = useState<string | null>(null);
+  const currentFontValue = useMemo(() => {
+    const knownOption = fontFamilyOptions.find((option) => option.value === settings.fontFamily);
+    return knownOption?.value || fontFamilyOptions[0].value;
+  }, [settings.fontFamily]);
 
   const tabItems = useMemo<TabItem<NonNullable<SettingsViewProps['initialTab']>>[]>(
     () => [
@@ -115,7 +119,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appe
                 {hosts.length === 0 ? (
                   <div className="settings-empty-card">
                     <strong>No hosts saved yet</strong>
-                    <span>Add a host from the sidebar, then it will appear in the session pickers.</span>
+                    <span>
+                      Add a host from the sidebar, then it will appear in the session pickers.
+                    </span>
                   </div>
                 ) : (
                   hosts.map((host) => (
@@ -154,7 +160,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appe
                 <CardHeader>
                   <CardTitle>Theme Direction</CardTitle>
                   <CardDescription>
-                    Switch the global shell theme and keep terminal fonts in sync with the rest of the UI.
+                    Switch the global shell theme and keep terminal fonts in sync with the rest of
+                    the UI.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="settings-form-grid">
@@ -183,10 +190,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appe
                   </label>
                   <label className="ui-field settings-form-span">
                     <span className="ui-field-label">Terminal font family</span>
-                    <Input
-                      type="text"
-                      value={settings.fontFamily}
-                      onChange={(event) => updateSettings({ fontFamily: event.target.value })}
+                    <Select
+                      value={currentFontValue}
+                      onChange={(value) => updateSettings({ fontFamily: value })}
+                      options={fontFamilyOptions.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                      }))}
                     />
                   </label>
                 </CardContent>
@@ -372,7 +382,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onClose, initialTab = 'appe
         <p>
           Delete{' '}
           <code className="settings-inline-code">
-            {snippets.find((snippet) => snippet.id === snippetPendingDelete)?.name || 'this snippet'}
+            {snippets.find((snippet) => snippet.id === snippetPendingDelete)?.name ||
+              'this snippet'}
           </code>
           ?
         </p>

@@ -47,6 +47,13 @@ contextBridge.exposeInMainWorld('electron', {
   localfs: {
     list: (dirPath: string) => ipcRenderer.invoke('localfs:list', dirPath),
     home: () => ipcRenderer.invoke('localfs:home'),
+    readFile: (filePath: string) => ipcRenderer.invoke('localfs:readFile', filePath),
+    writeFile: (filePath: string, content: string) =>
+      ipcRenderer.invoke('localfs:writeFile', filePath, content),
+    createFile: (filePath: string) => ipcRenderer.invoke('localfs:createFile', filePath),
+    createDirectory: (dirPath: string) => ipcRenderer.invoke('localfs:createDirectory', dirPath),
+    rename: (oldPath: string, newPath: string) =>
+      ipcRenderer.invoke('localfs:rename', oldPath, newPath),
   },
   ssh: {
     connect: (hostConfig: HostConfig): Promise<SSHConnectResult> =>

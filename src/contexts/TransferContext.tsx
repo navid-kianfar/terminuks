@@ -55,14 +55,31 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         await window.electron.sftp.upload(task.hostId, task.localPath, task.remotePath, task.id);
       }
 
+      window.dispatchEvent(
+        new CustomEvent('terminuks:transfer-finished', {
+          detail: task,
+        })
+      );
       setTasks((prev) =>
         prev.map((t) => (t.id === task.id ? { ...t, status: 'finished', progress: 100 } : t))
       );
     } catch (error) {
+      window.dispatchEvent(
+        new CustomEvent('terminuks:transfer-error', {
+          detail: {
+            ...task,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          },
+        })
+      );
       setTasks((prev) =>
         prev.map((t) =>
           t.id === task.id
-            ? { ...t, status: 'error', error: error instanceof Error ? error.message : 'Unknown error' }
+            ? {
+                ...t,
+                status: 'error',
+                error: error instanceof Error ? error.message : 'Unknown error',
+              }
             : t
         )
       );

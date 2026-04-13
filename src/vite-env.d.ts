@@ -55,6 +55,11 @@ interface Window {
         }>
       >;
       home: () => Promise<string>;
+      readFile: (filePath: string) => Promise<string>;
+      writeFile: (filePath: string, content: string) => Promise<void>;
+      createFile: (filePath: string) => Promise<void>;
+      createDirectory: (dirPath: string) => Promise<void>;
+      rename: (oldPath: string, newPath: string) => Promise<void>;
     };
     ssh: {
       connect: (hostConfig: ElectronHostConfig) => Promise<ElectronSSHConnectResult>;

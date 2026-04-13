@@ -11,6 +11,7 @@ import {
   FolderPlus,
   HardDrive,
   Pencil,
+  RefreshCw,
   Save,
   Search,
   Server,
@@ -44,6 +45,13 @@ interface LocalFileItem {
   type: 'file' | 'directory';
   size: number;
   modifyTime: number;
+}
+
+interface ContextMenuState {
+  pane: 'local' | 'remote';
+  x: number;
+  y: number;
+  itemPath: string | null;
 }
 
 const normalizeRemoteType = (type: string): RemoteFileItem['type'] => {
@@ -84,6 +92,12 @@ const getLocalParentPath = (currentPath: string) => {
   return parts.slice(0, -1).join('/') || '/';
 };
 
+const joinLocalPath = (basePath: string, name: string) => {
+  const separator = basePath.includes('\\') ? '\\' : '/';
+  const normalizedBase = basePath.replace(/[\\/]+$/, '');
+  return `${normalizedBase}${separator}${name}`;
+};
+
 const renderSkeletonRows = (prefix: string) =>
   Array.from({ length: 8 }, (_, index) => (
     <div key={`${prefix}-${index}`} className="workspace-skeleton-row">
@@ -106,14 +120,21 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
   const [selectedRemotePath, setSelectedRemotePath] = useState<string | null>(null);
   const [selectedLocalPath, setSelectedLocalPath] = useState<string | null>(null);
   const [editorPath, setEditorPath] = useState<string | null>(null);
+  const [editorPane, setEditorPane] = useState<'local' | 'remote' | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [editorLoading, setEditorLoading] = useState(false);
   const [editingPath, setEditingPath] = useState<'local' | 'remote' | null>(null);
-  const [dialogMode, setDialogMode] = useState<null | 'file' | 'folder' | 'delete' | 'rename'>(null);
+  const [dialogMode, setDialogMode] = useState<
+    null | 'file' | 'folder' | 'local-file' | 'local-folder' | 'delete' | 'rename' | 'rename-local'
+  >(null);
   const [draftName, setDraftName] = useState('');
   const [itemToRename, setItemToRename] = useState<{ path: string; name: string } | null>(null);
-  const [itemToDelete, setItemToDelete] = useState<{ path: string; name: string; type: 'file' | 'directory' | 'link' } | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{
+    path: string;
+    name: string;
+    type: 'file' | 'directory' | 'link';
+  } | null>(null);
   const [localFilter, setLocalFilter] = useState('');
   const [remoteFilter, setRemoteFilter] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -121,7 +142,10 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
   const { addTransfer } = useTransfer();
 
   const selectedRemoteFile = useMemo(
-    () => remoteFiles.find((file) => joinRemotePath(currentRemotePath, file.name) === selectedRemotePath),
+    () =>
+      remoteFiles.find(
+        (file) => joinRemotePath(currentRemotePath, file.name) === selectedRemotePath
+      ),
     [currentRemotePath, remoteFiles, selectedRemotePath]
   );
 
@@ -144,32 +168,35 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
       : remoteFiles;
   }, [remoteFiles, remoteFilter]);
 
-  const loadRemoteDirectory = useCallback(async (path: string) => {
-    if (!host) {
-      return;
-    }
+  const loadRemoteDirectory = useCallback(
+    async (path: string) => {
+      if (!host) {
+        return;
+      }
 
-    setLoadingRemote(true);
-    try {
-      await sftpService.connect(host).catch(() => undefined);
-      const listedFiles = await sftpService.listFiles(host.id, path);
-      setRemoteFiles(
-        listedFiles.map((file) => ({
-          name: file.name,
-          type: normalizeRemoteType(file.type),
-          size: file.size,
-          modifyTime: file.modifyTime,
-        }))
-      );
-      setStatus(`Browsing ${path}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load workspace';
-      setStatus(message);
-      setRemoteFiles([]);
-    } finally {
-      setLoadingRemote(false);
-    }
-  }, [host]);
+      setLoadingRemote(true);
+      try {
+        await sftpService.connect(host).catch(() => undefined);
+        const listedFiles = await sftpService.listFiles(host.id, path);
+        setRemoteFiles(
+          listedFiles.map((file) => ({
+            name: file.name,
+            type: normalizeRemoteType(file.type),
+            size: file.size,
+            modifyTime: file.modifyTime,
+          }))
+        );
+        setStatus(`Browsing ${path}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load workspace';
+        setStatus(message);
+        setRemoteFiles([]);
+      } finally {
+        setLoadingRemote(false);
+      }
+    },
+    [host]
+  );
 
   const loadLocalDirectory = useCallback(async (path: string) => {
     if (!window.electron) {
@@ -220,6 +247,46 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
     return () => window.removeEventListener('pointerdown', closeMenu);
   }, [contextMenu]);
 
+  useEffect(() => {
+    const handleTransferFinished = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          type: 'upload' | 'download';
+          hostId: string;
+          remotePath: string;
+          localPath: string;
+        }>
+      ).detail;
+
+      if (!detail) {
+        return;
+      }
+
+      if (
+        detail.type === 'upload' &&
+        detail.hostId === hostId &&
+        getRemoteParentPath(detail.remotePath) === currentRemotePath
+      ) {
+        loadRemoteDirectory(currentRemotePath);
+      }
+
+      if (
+        detail.type === 'download' &&
+        currentLocalPath &&
+        getLocalParentPath(detail.localPath) === currentLocalPath
+      ) {
+        loadLocalDirectory(currentLocalPath);
+      }
+    };
+
+    window.addEventListener('terminuks:transfer-finished', handleTransferFinished as EventListener);
+    return () =>
+      window.removeEventListener(
+        'terminuks:transfer-finished',
+        handleTransferFinished as EventListener
+      );
+  }, [currentLocalPath, currentRemotePath, hostId, loadLocalDirectory, loadRemoteDirectory]);
+
   const openRemoteFile = async (remotePath: string) => {
     if (!host) {
       return;
@@ -228,12 +295,34 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
     setEditorLoading(true);
     try {
       const content = await sftpService.readFile(host.id, remotePath);
+      setEditorPane('remote');
       setEditorPath(remotePath);
       setEditorContent(content);
       setDirty(false);
       setStatus(`Opened ${remotePath}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to open file';
+      setStatus(message);
+    } finally {
+      setEditorLoading(false);
+    }
+  };
+
+  const openLocalFile = async (localPath: string) => {
+    if (!window.electron) {
+      return;
+    }
+
+    setEditorLoading(true);
+    try {
+      const content = await window.electron.localfs.readFile(localPath);
+      setEditorPane('local');
+      setEditorPath(localPath);
+      setEditorContent(content);
+      setDirty(false);
+      setStatus(`Opened ${localPath}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to open local file';
       setStatus(message);
     } finally {
       setEditorLoading(false);
@@ -276,57 +365,79 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
     if (file.type === 'directory') {
       loadLocalDirectory(file.path);
       setSelectedLocalPath(null);
+      return;
     }
+
+    openLocalFile(file.path);
   };
 
-  const uploadLocalFile = useCallback(async (localPath: string) => {
-    if (!host) return;
+  const uploadLocalFile = useCallback(
+    async (localPath: string) => {
+      if (!host) return;
 
-    const fileName = localPath.split(/[\\/]/).pop() || 'upload';
-    const remotePath = joinRemotePath(currentRemotePath, fileName);
-    
-    addTransfer({
-      name: fileName,
-      type: 'upload',
-      hostId: host.id,
-      remotePath,
-      localPath,
-    });
-    
-    setStatus(`Added ${fileName} to transfer queue`);
-  }, [host, currentRemotePath, addTransfer]);
+      const fileName = localPath.split(/[\\/]/).pop() || 'upload';
+      const remotePath = joinRemotePath(currentRemotePath, fileName);
 
-  const downloadRemoteFile = useCallback(async (remotePath: string) => {
-    if (!host || !window.electron) return;
+      addTransfer({
+        name: fileName,
+        type: 'upload',
+        hostId: host.id,
+        remotePath,
+        localPath,
+      });
 
-    const fileName = remotePath.split('/').pop() || 'download';
-    const targetPath = currentLocalPath
-      ? `${currentLocalPath}/${fileName}`
-      : (await window.electron.dialog.saveFile({ defaultPath: fileName })).filePath;
+      setStatus(`Added ${fileName} to transfer queue`);
+    },
+    [host, currentRemotePath, addTransfer]
+  );
 
-    if (!targetPath) return;
+  const downloadRemoteFile = useCallback(
+    async (remotePath: string) => {
+      if (!host || !window.electron) return;
 
-    addTransfer({
-      name: fileName,
-      type: 'download',
-      hostId: host.id,
-      remotePath,
-      localPath: targetPath,
-    });
+      const fileName = remotePath.split('/').pop() || 'download';
+      const targetPath = currentLocalPath
+        ? `${currentLocalPath}/${fileName}`
+        : (await window.electron.dialog.saveFile({ defaultPath: fileName })).filePath;
 
-    setStatus(`Added ${fileName} to transfer queue`);
-  }, [host, currentLocalPath, addTransfer]);
+      if (!targetPath) return;
+
+      addTransfer({
+        name: fileName,
+        type: 'download',
+        hostId: host.id,
+        remotePath,
+        localPath: targetPath,
+      });
+
+      setStatus(`Added ${fileName} to transfer queue`);
+    },
+    [host, currentLocalPath, addTransfer]
+  );
 
   const saveFile = async () => {
-    if (!host || !editorPath) {
+    if (!editorPath) {
       return;
     }
 
     try {
-      await sftpService.writeFile(host.id, editorPath, editorContent);
+      if (editorPane === 'local') {
+        if (!window.electron) {
+          return;
+        }
+        await window.electron.localfs.writeFile(editorPath, editorContent);
+        if (currentLocalPath) {
+          await loadLocalDirectory(currentLocalPath);
+        }
+      } else {
+        if (!host) {
+          return;
+        }
+        await sftpService.writeFile(host.id, editorPath, editorContent);
+        await loadRemoteDirectory(currentRemotePath);
+      }
       setDirty(false);
       setStatus(`Saved ${editorPath}`);
-      await loadRemoteDirectory(currentRemotePath);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save file';
       setStatus(message);
@@ -334,7 +445,13 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
   };
 
   const submitDialog = async () => {
-    if (!host) {
+    if (
+      !host &&
+      (dialogMode === 'file' ||
+        dialogMode === 'folder' ||
+        dialogMode === 'delete' ||
+        dialogMode === 'rename')
+    ) {
       return;
     }
 
@@ -351,6 +468,21 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
         const targetPath = joinRemotePath(currentRemotePath, draftName.trim());
         await sftpService.createDirectory(host.id, targetPath);
         await loadRemoteDirectory(currentRemotePath);
+        setStatus(`Created ${targetPath}`);
+      }
+
+      if (dialogMode === 'local-file' && currentLocalPath && draftName.trim()) {
+        const targetPath = joinLocalPath(currentLocalPath, draftName.trim());
+        await window.electron?.localfs.createFile(targetPath);
+        await loadLocalDirectory(currentLocalPath);
+        await openLocalFile(targetPath);
+        setStatus(`Created ${targetPath}`);
+      }
+
+      if (dialogMode === 'local-folder' && currentLocalPath && draftName.trim()) {
+        const targetPath = joinLocalPath(currentLocalPath, draftName.trim());
+        await window.electron?.localfs.createDirectory(targetPath);
+        await loadLocalDirectory(currentLocalPath);
         setStatus(`Created ${targetPath}`);
       }
 
@@ -375,6 +507,20 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
         const newPath = joinRemotePath(parent, draftName.trim());
         await sftpService.rename(host.id, itemToRename.path, newPath);
         await loadRemoteDirectory(currentRemotePath);
+        setStatus(`Renamed to ${draftName.trim()}`);
+      }
+
+      if (dialogMode === 'rename-local' && itemToRename && draftName.trim()) {
+        const parent = getLocalParentPath(itemToRename.path);
+        const newPath = joinLocalPath(parent, draftName.trim());
+        await window.electron?.localfs.rename(itemToRename.path, newPath);
+        if (editorPane === 'local' && editorPath === itemToRename.path) {
+          setEditorPath(newPath);
+        }
+        setSelectedLocalPath(newPath);
+        if (currentLocalPath) {
+          await loadLocalDirectory(currentLocalPath);
+        }
         setStatus(`Renamed to ${draftName.trim()}`);
       }
     } catch (error) {
@@ -407,6 +553,16 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
     () => (editorPath ? resolveLanguage(editorPath) : []),
     [editorPath]
   );
+  const contextLocalFile =
+    contextMenu?.pane === 'local' && contextMenu.itemPath
+      ? (localFiles.find((file) => file.path === contextMenu.itemPath) ?? null)
+      : null;
+  const contextRemoteFile =
+    contextMenu?.pane === 'remote' && contextMenu.itemPath
+      ? (remoteFiles.find(
+          (file) => joinRemotePath(currentRemotePath, file.name) === contextMenu.itemPath
+        ) ?? null)
+      : null;
 
   return (
     <div className="ssh-workspace">
@@ -449,12 +605,39 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
               type="button"
               className="workspace-icon-btn"
               disabled={!currentLocalPath}
+              onClick={() => currentLocalPath && loadLocalDirectory(currentLocalPath)}
+              title="Refresh local folder"
+            >
+              <RefreshCw size={14} />
+            </button>
+            <button
+              type="button"
+              className="workspace-icon-btn"
+              disabled={!currentLocalPath}
               onClick={() =>
                 currentLocalPath && loadLocalDirectory(getLocalParentPath(currentLocalPath))
               }
               title="Up"
             >
               <ArrowUp size={14} />
+            </button>
+            <button
+              type="button"
+              className="workspace-icon-btn"
+              disabled={!currentLocalPath}
+              onClick={() => setDialogMode('local-file')}
+              title="New local file"
+            >
+              <FilePlus2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="workspace-icon-btn"
+              disabled={!currentLocalPath}
+              onClick={() => setDialogMode('local-folder')}
+              title="New local folder"
+            >
+              <FolderPlus size={14} />
             </button>
           </div>
         </div>
@@ -552,6 +735,14 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
             <button
               type="button"
               className="workspace-icon-btn"
+              onClick={() => loadRemoteDirectory(currentRemotePath)}
+              title="Refresh remote folder"
+            >
+              <RefreshCw size={14} />
+            </button>
+            <button
+              type="button"
+              className="workspace-icon-btn"
               disabled={currentRemotePath === '/'}
               onClick={() => setCurrentRemotePath(getRemoteParentPath(currentRemotePath))}
               title="Up"
@@ -598,12 +789,12 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
               disabled={!selectedRemotePath}
               onClick={() => {
                 if (selectedRemotePath) {
-                   setItemToDelete({ 
-                     path: selectedRemotePath, 
-                     name: selectedRemotePath.split('/').pop() || 'item',
-                     type: selectedRemoteFile?.type || 'file'
-                   });
-                   setDialogMode('delete');
+                  setItemToDelete({
+                    path: selectedRemotePath,
+                    name: selectedRemotePath.split('/').pop() || 'item',
+                    type: selectedRemoteFile?.type || 'file',
+                  });
+                  setDialogMode('delete');
                 }
               }}
               title="Delete"
@@ -623,7 +814,7 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
           />
         </div>
 
-        <div 
+        <div
           className="workspace-file-list"
           onClick={() => setSelectedRemotePath(null)}
           onContextMenu={(event) => openContextMenu(event, 'remote', null)}
@@ -685,12 +876,12 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
         >
           {contextMenu.pane === 'local' ? (
             <>
-              {selectedLocalFile?.type === 'directory' && (
+              {contextLocalFile?.type === 'directory' && (
                 <button
                   type="button"
                   className="workspace-context-item"
                   onClick={() => {
-                    loadLocalDirectory(selectedLocalPath);
+                    loadLocalDirectory(contextLocalFile.path);
                     setContextMenu(null);
                   }}
                 >
@@ -698,12 +889,42 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
                   <span>Open Folder</span>
                 </button>
               )}
-              {selectedLocalPath && (
+              {contextLocalFile?.type === 'file' && contextMenu.itemPath && (
                 <button
                   type="button"
                   className="workspace-context-item"
                   onClick={() => {
-                    uploadLocalFile(selectedLocalPath);
+                    openLocalFile(contextMenu.itemPath!);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Pencil size={14} />
+                  <span>Edit in Dialog</span>
+                </button>
+              )}
+              {contextMenu.itemPath && (
+                <button
+                  type="button"
+                  className="workspace-context-item"
+                  onClick={() => {
+                    const name =
+                      contextLocalFile?.name || contextMenu.itemPath.split(/[\\/]/).pop() || '';
+                    setDraftName(name);
+                    setItemToRename({ path: contextMenu.itemPath, name });
+                    setDialogMode('rename-local');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Type size={14} />
+                  <span>Rename</span>
+                </button>
+              )}
+              {contextLocalFile?.type === 'file' && contextMenu.itemPath && (
+                <button
+                  type="button"
+                  className="workspace-context-item"
+                  onClick={() => {
+                    uploadLocalFile(contextMenu.itemPath!);
                     setContextMenu(null);
                   }}
                 >
@@ -711,6 +932,41 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
                   <span>Upload</span>
                 </button>
               )}
+              <button
+                type="button"
+                className="workspace-context-item"
+                onClick={() => {
+                  if (currentLocalPath) {
+                    loadLocalDirectory(currentLocalPath);
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <RefreshCw size={14} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-context-item"
+                onClick={() => {
+                  setDialogMode('local-file');
+                  setContextMenu(null);
+                }}
+              >
+                <FilePlus2 size={14} />
+                <span>New File</span>
+              </button>
+              <button
+                type="button"
+                className="workspace-context-item"
+                onClick={() => {
+                  setDialogMode('local-folder');
+                  setContextMenu(null);
+                }}
+              >
+                <FolderPlus size={14} />
+                <span>New Folder</span>
+              </button>
               <button
                 type="button"
                 className="workspace-context-item"
@@ -809,10 +1065,10 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
                   type="button"
                   className="workspace-context-item danger"
                   onClick={() => {
-                    setItemToDelete({ 
-                      path: selectedRemotePath, 
+                    setItemToDelete({
+                      path: selectedRemotePath,
                       name: selectedRemotePath.split('/').pop() || 'item',
-                      type: selectedRemoteFile?.type || 'file'
+                      type: selectedRemoteFile?.type || 'file',
                     });
                     setDialogMode('delete');
                     setContextMenu(null);
@@ -829,19 +1085,25 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
 
       {editorPath && (
         <AppDialog
-          title={editorPath.split('/').pop() || 'Remote File'}
+          title={editorPath.split(/[\\/]/).pop() || 'File'}
           description={editorPath}
           size="wide"
           containToParent
           bodyClassName="app-dialog-body-flush"
           headerActions={
-            <Button type="button" variant="outline" onClick={saveFile} disabled={!dirty || editorLoading}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={saveFile}
+              disabled={!dirty || editorLoading}
+            >
               <Save size={14} />
               Save
             </Button>
           }
           onClose={() => {
             setEditorPath(null);
+            setEditorPane(null);
             setDirty(false);
           }}
         >
@@ -854,7 +1116,9 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
                 value={editorContent}
                 height="68vh"
                 theme={resolvedTheme === 'light' ? 'light' : 'dark'}
-                extensions={Array.isArray(languageExtension) ? languageExtension : [languageExtension]}
+                extensions={
+                  Array.isArray(languageExtension) ? languageExtension : [languageExtension]
+                }
                 onChange={(value) => {
                   setEditorContent(value);
                   setDirty(true);
@@ -867,32 +1131,47 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
 
       <AlertDialog
         open={dialogMode === 'delete' && Boolean(itemToDelete)}
-          title="Delete Selection"
-          description="This action removes the selected remote item."
-          onClose={() => {
-            setDialogMode(null);
-            setItemToDelete(null);
-          }}
-          onConfirm={submitDialog}
+        title="Delete Selection"
+        description="This action removes the selected remote item."
+        onClose={() => {
+          setDialogMode(null);
+          setItemToDelete(null);
+        }}
+        onConfirm={submitDialog}
       >
         <p className="workspace-dialog-copy">
           Delete <code>{itemToDelete?.name || 'this item'}</code>?
         </p>
       </AlertDialog>
 
-      {(dialogMode === 'file' || dialogMode === 'folder' || dialogMode === 'rename') && (
+      {(dialogMode === 'file' ||
+        dialogMode === 'folder' ||
+        dialogMode === 'local-file' ||
+        dialogMode === 'local-folder' ||
+        dialogMode === 'rename' ||
+        dialogMode === 'rename-local') && (
         <AppDialog
           title={
             dialogMode === 'file'
               ? 'Create File'
               : dialogMode === 'folder'
                 ? 'Create Folder'
-                : 'Rename Item'
+                : dialogMode === 'local-file'
+                  ? 'Create Local File'
+                  : dialogMode === 'local-folder'
+                    ? 'Create Local Folder'
+                    : dialogMode === 'rename-local'
+                      ? 'Rename Local Item'
+                      : 'Rename Item'
           }
           description={
             dialogMode === 'rename'
               ? 'Enter a new name for the remote item.'
-              : 'Choose the remote name to create in the current directory.'
+              : dialogMode === 'rename-local'
+                ? 'Enter a new name for the local item.'
+                : dialogMode === 'local-file' || dialogMode === 'local-folder'
+                  ? 'Choose the local name to create in the current directory.'
+                  : 'Choose the remote name to create in the current directory.'
           }
           onClose={() => {
             setDialogMode(null);
@@ -905,16 +1184,22 @@ const SSHWorkspace = ({ hostId }: SSHWorkspaceProps) => {
               type="text"
               autoFocus
               value={draftName}
-              placeholder={dialogMode === 'file' ? 'config.json' : 'new-folder'}
+              placeholder={
+                dialogMode === 'file' || dialogMode === 'local-file' ? 'config.json' : 'new-folder'
+              }
               onChange={(event) => setDraftName(event.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submitDialog()}
             />
             <div className="workspace-dialog-buttons">
-              <button type="button" className="workspace-ghost-btn" onClick={() => setDialogMode(null)}>
+              <button
+                type="button"
+                className="workspace-ghost-btn"
+                onClick={() => setDialogMode(null)}
+              >
                 Cancel
               </button>
               <button type="button" className="workspace-primary-btn" onClick={submitDialog}>
-                {dialogMode === 'rename' ? 'Rename' : 'Create'}
+                {dialogMode === 'rename' || dialogMode === 'rename-local' ? 'Rename' : 'Create'}
               </button>
             </div>
           </div>
