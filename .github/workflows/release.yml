@@ -31,11 +31,12 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
-      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+      # Mac signing/notarization secrets are temporarily disabled because signing breaks CI.
+      # APPLE_ID: ${{ secrets.APPLE_ID }}
+      # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+      # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+      # CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
 
     steps:
       - name: Check out repository
