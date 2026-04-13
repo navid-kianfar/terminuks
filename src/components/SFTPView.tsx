@@ -1,29 +1,30 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
-import { resolveLanguage } from '../utils/editor-utils';
 import {
-  Folder,
+  ArrowUp,
+  Download,
   File,
   FilePlus2,
-  RefreshCw,
-  ArrowUp,
-  FolderPlus,
-  Download,
-  Upload,
-  Trash2,
-  HardDrive,
-  Server,
-  Search,
+  Folder,
   FolderOpen,
-  Type,
+  FolderPlus,
+  HardDrive,
   Pencil,
+  RefreshCw,
   Save,
+  Search,
+  Server,
+  Trash2,
+  Type,
+  Upload,
 } from 'lucide-react';
+import { resolveLanguage } from '../utils/editor-utils';
 import { useHosts } from '../contexts/HostContext';
 import { useTerminal } from '../contexts/TerminalContext';
 import { useTransfer } from '../contexts/TransferContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { sftpService } from '../services/sftp';
+import { Host } from '../types';
 import AppDialog from './AppDialog';
 import SessionLauncherDialog from './SessionLauncherDialog';
 import AlertDialog from './ui/alert-dialog';
@@ -50,12 +51,36 @@ interface LocalFileItem {
 }
 
 type PaneType = 'local' | 'remote';
+type WorkspaceVariant = 'session' | 'embedded';
+
+type DialogMode =
+  | null
+  | 'create-remote-file'
+  | 'create-remote-folder'
+  | 'create-local-file'
+  | 'create-local-folder'
+  | 'rename-remote'
+  | 'rename-local'
+  | 'delete-remote';
 
 interface ContextMenuState {
   pane: PaneType;
   x: number;
   y: number;
   itemPath: string | null;
+}
+
+interface RenameTarget {
+  path: string;
+  name: string;
+}
+
+interface DualPaneSFTPWorkspaceProps {
+  host?: Host;
+  variant?: WorkspaceVariant;
+  hostPickerHosts?: Host[];
+  onSelectHost?: (host: Host) => void;
+  onRemoteStateChange?: (status: 'connected' | 'error', message?: string) => void;
 }
 
 const renderSkeletonRows = (prefix: string) =>
@@ -130,12 +155,35 @@ const buildRangeSelection = (items: string[], anchor: string | null, target: str
   return items.slice(lower, upper + 1);
 };
 
-const SFTPView = ({ sessionId }: SFTPViewProps) => {
-  const { getHost, hosts } = useHosts();
+const summarizeTransferQueue = (
+  direction: 'upload' | 'download',
+  fileCount: number,
+  folderCount: number
+) => {
+  if (!fileCount && !folderCount) {
+    return `Nothing to ${direction}`;
+  }
+
+  const parts: string[] = [];
+  if (fileCount) {
+    parts.push(`${fileCount} file${fileCount === 1 ? '' : 's'}`);
+  }
+  if (folderCount) {
+    parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'}`);
+  }
+
+  return `Queued ${direction} for ${parts.join(' and ')}`;
+};
+
+export const DualPaneSFTPWorkspace = ({
+  host,
+  variant = 'session',
+  hostPickerHosts = [],
+  onSelectHost,
+  onRemoteStateChange,
+}: DualPaneSFTPWorkspaceProps) => {
   const { resolvedTheme } = useTheme();
-  const { getSession, updateSession } = useTerminal();
-  const session = getSession(sessionId);
-  const host = session?.hostId ? getHost(session.hostId) : undefined;
+  const { addTransfer } = useTransfer();
   const [currentRemotePath, setCurrentRemotePath] = useState('/');
   const [currentLocalPath, setCurrentLocalPath] = useState<string | null>(null);
   const [remoteFiles, setRemoteFiles] = useState<RemoteFileItem[]>([]);
@@ -154,22 +202,18 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
   const [editorDirty, setEditorDirty] = useState(false);
   const [editorLoading, setEditorLoading] = useState(false);
   const [editingPath, setEditingPath] = useState<PaneType | null>(null);
-  const [dialogMode, setDialogMode] = useState<
-    | null
-    | 'create-folder'
-    | 'create-local-folder'
-    | 'create-local-file'
-    | 'delete-remote'
-    | 'rename-remote'
-    | 'rename-local'
-  >(null);
+  const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [draftName, setDraftName] = useState('');
-  const [itemToRename, setItemToRename] = useState<{ path: string; name: string } | null>(null);
+  const [itemToRename, setItemToRename] = useState<RenameTarget | null>(null);
   const [itemsToDelete, setItemsToDelete] = useState<string[]>([]);
   const [localFilter, setLocalFilter] = useState('');
   const [remoteFilter, setRemoteFilter] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showHostPicker, setShowHostPicker] = useState(false);
+  const previousHostIdRef = useRef<string | undefined>(host?.id);
+
+  const hostPickerEnabled = hostPickerHosts.length > 0 && Boolean(onSelectHost);
+
   const filteredLocalFiles = useMemo(() => {
     const query = localFilter.trim().toLowerCase();
     return query
@@ -184,24 +228,38 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
       : remoteFiles;
   }, [remoteFiles, remoteFilter]);
 
-  const localItemPaths = useMemo(
+  const localVisiblePaths = useMemo(
     () => filteredLocalFiles.map((file) => file.path),
     [filteredLocalFiles]
   );
-  const remoteItemPaths = useMemo(
+  const remoteVisiblePaths = useMemo(
     () => filteredRemoteFiles.map((file) => joinRemotePath(currentRemotePath, file.name)),
     [filteredRemoteFiles, currentRemotePath]
   );
 
+  const localEntriesByPath = useMemo(
+    () => new Map(localFiles.map((file) => [file.path, file])),
+    [localFiles]
+  );
+  const remoteEntriesByPath = useMemo(
+    () =>
+      new Map(
+        remoteFiles.map((file) => [joinRemotePath(currentRemotePath, file.name), file] as const)
+      ),
+    [remoteFiles, currentRemotePath]
+  );
+
   const loadRemoteFiles = useCallback(
-    async (path: string) => {
-      if (!host) return;
+    async (path: string, nextSelection: string[] = []) => {
+      if (!host) {
+        return;
+      }
+
       setLoadingRemote(true);
       setError(null);
       try {
         await sftpService.connect(host).catch(() => undefined);
         const fileList = await sftpService.listFiles(host.id, path);
-        updateSession(sessionId, { status: 'connected', lastError: undefined });
         setRemoteFiles(
           fileList.map((file) => ({
             name: file.name,
@@ -210,21 +268,24 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
             modifyTime: file.modifyTime || Date.now(),
           }))
         );
-        setSelectedRemotePaths([]);
-        setRemoteAnchor(null);
+        setSelectedRemotePaths(nextSelection);
+        setRemoteAnchor(nextSelection.length > 0 ? nextSelection[nextSelection.length - 1] : null);
+        onRemoteStateChange?.('connected');
       } catch (loadError: unknown) {
         const message = loadError instanceof Error ? loadError.message : 'Unknown SFTP error';
-        updateSession(sessionId, { status: 'error', lastError: message });
+        onRemoteStateChange?.('error', message);
         setError(message);
         setRemoteFiles([]);
+        setSelectedRemotePaths([]);
+        setRemoteAnchor(null);
       } finally {
         setLoadingRemote(false);
       }
     },
-    [host, sessionId, updateSession]
+    [host, onRemoteStateChange]
   );
 
-  const loadLocalFiles = useCallback(async (path: string) => {
+  const loadLocalFiles = useCallback(async (path: string, nextSelection: string[] = []) => {
     if (!window.electron) {
       return;
     }
@@ -234,23 +295,19 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
       const entries = await window.electron.localfs.list(path);
       setCurrentLocalPath(path);
       setLocalFiles(entries);
-      setSelectedLocalPaths([]);
-      setLocalAnchor(null);
+      setSelectedLocalPaths(nextSelection);
+      setLocalAnchor(nextSelection.length > 0 ? nextSelection[nextSelection.length - 1] : null);
     } catch (loadError: unknown) {
       const message =
         loadError instanceof Error ? loadError.message : 'Unknown local filesystem error';
       setError(message);
       setLocalFiles([]);
+      setSelectedLocalPaths([]);
+      setLocalAnchor(null);
     } finally {
       setLoadingLocal(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (host) {
-      loadRemoteFiles(currentRemotePath);
-    }
-  }, [host, currentRemotePath, loadRemoteFiles]);
 
   useEffect(() => {
     if (!window.electron || currentLocalPath) {
@@ -268,61 +325,38 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
   }, [currentLocalPath, loadLocalFiles]);
 
   useEffect(() => {
+    if (previousHostIdRef.current !== host?.id) {
+      previousHostIdRef.current = host?.id;
+      setCurrentRemotePath('/');
+      setRemoteFiles([]);
+      setSelectedRemotePaths([]);
+      setRemoteAnchor(null);
+      setContextMenu(null);
+      return;
+    }
+
+    if (host) {
+      loadRemoteFiles(currentRemotePath);
+      return;
+    }
+
+    setRemoteFiles([]);
+    setSelectedRemotePaths([]);
+    setRemoteAnchor(null);
+  }, [host, currentRemotePath, loadRemoteFiles]);
+
+  useEffect(() => {
     if (!contextMenu) return;
-    const closeMenu = (e: PointerEvent) => {
-      const target = e.target as HTMLElement;
+
+    const closeMenu = (event: PointerEvent) => {
+      const target = event.target as HTMLElement;
       if (target.closest('.sftp-context-menu')) return;
       setContextMenu(null);
     };
+
     window.addEventListener('pointerdown', closeMenu);
     return () => window.removeEventListener('pointerdown', closeMenu);
   }, [contextMenu]);
-
-  const chooseLocalDirectory = async () => {
-    if (!window.electron) {
-      setError('Electron app is required for local file browsing.');
-      return;
-    }
-
-    const result = await window.electron.dialog.openDirectory();
-    if (!result.canceled && result.filePaths[0]) {
-      loadLocalFiles(result.filePaths[0]);
-    }
-  };
-
-  const selectLocal = (path: string, event: React.MouseEvent) => {
-    if (event.shiftKey) {
-      setSelectedLocalPaths(buildRangeSelection(localItemPaths, localAnchor, path));
-      return;
-    }
-
-    if (event.metaKey || event.ctrlKey) {
-      setSelectedLocalPaths((current) => toggleSelection(current, path));
-      setLocalAnchor(path);
-      return;
-    }
-
-    setSelectedLocalPaths([path]);
-    setLocalAnchor(path);
-  };
-
-  const selectRemote = (path: string, event: React.MouseEvent) => {
-    if (event.shiftKey) {
-      setSelectedRemotePaths(buildRangeSelection(remoteItemPaths, remoteAnchor, path));
-      return;
-    }
-
-    if (event.metaKey || event.ctrlKey) {
-      setSelectedRemotePaths((current) => toggleSelection(current, path));
-      setRemoteAnchor(path);
-      return;
-    }
-
-    setSelectedRemotePaths([path]);
-    setRemoteAnchor(path);
-  };
-
-  const { addTransfer } = useTransfer();
 
   useEffect(() => {
     const handleTransferFinished = (event: Event) => {
@@ -365,55 +399,110 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
       );
   }, [currentLocalPath, currentRemotePath, host, loadLocalFiles, loadRemoteFiles]);
 
-  const uploadLocalFiles = useCallback(
-    async (paths: string[]) => {
-      if (!host || paths.length === 0) return;
-
-      paths.forEach((localPath) => {
-        const fileName = localPath.split(/[\\/]/).pop() || 'upload';
-        const remotePath = joinRemotePath(currentRemotePath, fileName);
-
-        addTransfer({
-          name: fileName,
-          type: 'upload',
-          hostId: host.id,
-          remotePath,
-          localPath,
-        });
-      });
-
-      setFeedback(`Adding ${paths.length} file(s) to transfer queue`);
-    },
-    [host, currentRemotePath, addTransfer]
+  const selectedLocalEntries = useMemo(
+    () =>
+      selectedLocalPaths
+        .map((path) => localEntriesByPath.get(path))
+        .filter((entry): entry is LocalFileItem => Boolean(entry)),
+    [localEntriesByPath, selectedLocalPaths]
   );
 
-  const downloadRemoteFiles = useCallback(
-    async (paths: string[], targetDir?: string) => {
-      if (!host || !window.electron || paths.length === 0) return;
+  const selectedRemoteEntries = useMemo(
+    () =>
+      selectedRemotePaths
+        .map((path) => remoteEntriesByPath.get(path))
+        .filter((entry): entry is RemoteFileItem => Boolean(entry)),
+    [remoteEntriesByPath, selectedRemotePaths]
+  );
 
-      for (const remotePath of paths) {
-        const fileName = remotePath.split('/').pop() || 'download';
-        let targetPath = targetDir ? `${targetDir}/${fileName}` : null;
+  const selectedLocalName =
+    selectedLocalPaths.length === 1 ? selectedLocalPaths[0].split(/[\\/]/).pop() : null;
+  const selectedRemoteName =
+    selectedRemotePaths.length === 1 ? selectedRemotePaths[0].split('/').pop() : null;
 
-        if (!targetPath) {
-          const result = await window.electron.dialog.saveFile({ defaultPath: fileName });
-          if (result.canceled || !result.filePath) continue;
-          targetPath = result.filePath;
-        }
+  const contextLocalFile =
+    contextMenu?.pane === 'local' && contextMenu.itemPath
+      ? (localEntriesByPath.get(contextMenu.itemPath) ?? null)
+      : null;
+  const contextRemoteFile =
+    contextMenu?.pane === 'remote' && contextMenu.itemPath
+      ? (remoteEntriesByPath.get(contextMenu.itemPath) ?? null)
+      : null;
 
-        addTransfer({
-          name: fileName,
-          type: 'download',
-          hostId: host.id,
-          remotePath,
-          localPath: targetPath,
-        });
+  const contextLocalEntries = useMemo(() => {
+    if (!contextMenu?.itemPath || contextMenu.pane !== 'local' || !contextLocalFile) {
+      return [] as LocalFileItem[];
+    }
+
+    return selectedLocalPaths.includes(contextMenu.itemPath)
+      ? selectedLocalEntries
+      : [contextLocalFile];
+  }, [contextLocalFile, contextMenu, selectedLocalEntries, selectedLocalPaths]);
+
+  const contextRemoteEntries = useMemo(() => {
+    if (!contextMenu?.itemPath || contextMenu.pane !== 'remote' || !contextRemoteFile) {
+      return [] as RemoteFileItem[];
+    }
+
+    return selectedRemotePaths.includes(contextMenu.itemPath)
+      ? selectedRemoteEntries
+      : [contextRemoteFile];
+  }, [contextMenu, contextRemoteFile, selectedRemoteEntries, selectedRemotePaths]);
+
+  const editorLanguage = useMemo(
+    () => (editorPath ? resolveLanguage(editorPath) : []),
+    [editorPath]
+  );
+
+  const chooseLocalDirectory = async () => {
+    if (!window.electron) {
+      setError('Electron app is required for local file browsing.');
+      return;
+    }
+
+    const result = await window.electron.dialog.openDirectory();
+    if (!result.canceled && result.filePaths[0]) {
+      loadLocalFiles(result.filePaths[0]);
+    }
+  };
+
+  const selectLocal = (path: string, event: React.MouseEvent) => {
+    if (event.shiftKey) {
+      setSelectedLocalPaths(buildRangeSelection(localVisiblePaths, localAnchor, path));
+      if (!localAnchor) {
+        setLocalAnchor(path);
       }
+      return;
+    }
 
-      setFeedback(`Adding ${paths.length} file(s) to transfer queue`);
-    },
-    [host, addTransfer]
-  );
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedLocalPaths((current) => toggleSelection(current, path));
+      setLocalAnchor(path);
+      return;
+    }
+
+    setSelectedLocalPaths([path]);
+    setLocalAnchor(path);
+  };
+
+  const selectRemote = (path: string, event: React.MouseEvent) => {
+    if (event.shiftKey) {
+      setSelectedRemotePaths(buildRangeSelection(remoteVisiblePaths, remoteAnchor, path));
+      if (!remoteAnchor) {
+        setRemoteAnchor(path);
+      }
+      return;
+    }
+
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedRemotePaths((current) => toggleSelection(current, path));
+      setRemoteAnchor(path);
+      return;
+    }
+
+    setSelectedRemotePaths([path]);
+    setRemoteAnchor(path);
+  };
 
   const openRemoteEditor = async (remotePath: string) => {
     if (!host) {
@@ -479,12 +568,208 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
       }
 
       setEditorDirty(false);
-      setFeedback(`Saved ${editorPath.split('/').pop()}`);
+      setFeedback(`Saved ${editorPath.split(/[\\/]/).pop()}`);
     } catch (saveError: unknown) {
       const message = saveError instanceof Error ? saveError.message : 'Unknown save error';
       setError(`Save failed: ${message}`);
     }
   };
+
+  const queueUploadEntries = useCallback(
+    async (entries: LocalFileItem[]) => {
+      if (!host || !window.electron || entries.length === 0) {
+        return;
+      }
+
+      setError(null);
+
+      try {
+        await sftpService.connect(host).catch(() => undefined);
+
+        let fileCount = 0;
+        let folderCount = 0;
+        const preparedRemoteFolders = new Set<string>();
+
+        const queueEntry = async (
+          entry: LocalFileItem,
+          remoteParentPath: string,
+          label: string
+        ) => {
+          const remoteTargetPath = joinRemotePath(remoteParentPath, entry.name);
+
+          if (entry.type === 'directory') {
+            if (!preparedRemoteFolders.has(remoteTargetPath)) {
+              preparedRemoteFolders.add(remoteTargetPath);
+              await sftpService.createDirectory(host.id, remoteTargetPath);
+              folderCount += 1;
+            }
+
+            const children = await window.electron!.localfs.list(entry.path);
+            for (const child of children) {
+              await queueEntry(child, remoteTargetPath, `${label}/${child.name}`);
+            }
+            return;
+          }
+
+          addTransfer({
+            name: label,
+            type: 'upload',
+            hostId: host.id,
+            remotePath: remoteTargetPath,
+            localPath: entry.path,
+          });
+          fileCount += 1;
+        };
+
+        for (const entry of entries) {
+          await queueEntry(entry, currentRemotePath, entry.name);
+        }
+
+        if (folderCount > 0 && fileCount === 0) {
+          await loadRemoteFiles(currentRemotePath);
+        }
+
+        setFeedback(summarizeTransferQueue('upload', fileCount, folderCount));
+      } catch (queueError: unknown) {
+        const message = queueError instanceof Error ? queueError.message : 'Unknown upload error';
+        setError(`Upload failed: ${message}`);
+      }
+    },
+    [addTransfer, currentRemotePath, host, loadRemoteFiles]
+  );
+
+  const queueUploadPaths = useCallback(
+    async (paths: string[]) => {
+      const entries = paths
+        .map((path) => localEntriesByPath.get(path))
+        .filter((entry): entry is LocalFileItem => Boolean(entry));
+
+      await queueUploadEntries(entries);
+    },
+    [localEntriesByPath, queueUploadEntries]
+  );
+
+  const queueDownloadEntries = useCallback(
+    async (entries: RemoteFileItem[], targetDirectory?: string) => {
+      if (!host || !window.electron || entries.length === 0) {
+        return;
+      }
+
+      setError(null);
+
+      try {
+        await sftpService.connect(host).catch(() => undefined);
+
+        const includesDirectory = entries.some((entry) => entry.type === 'directory');
+        let resolvedTargetDirectory = targetDirectory || currentLocalPath;
+
+        if (!resolvedTargetDirectory) {
+          if (!includesDirectory && entries.length === 1) {
+            const onlyEntry = entries[0];
+            const onlyEntryPath = joinRemotePath(currentRemotePath, onlyEntry.name);
+            const result = await window.electron.dialog.saveFile({ defaultPath: onlyEntry.name });
+
+            if (result.canceled || !result.filePath) {
+              return;
+            }
+
+            addTransfer({
+              name: onlyEntry.name,
+              type: 'download',
+              hostId: host.id,
+              remotePath: onlyEntryPath,
+              localPath: result.filePath,
+            });
+            setFeedback(summarizeTransferQueue('download', 1, 0));
+            return;
+          }
+
+          const result = await window.electron.dialog.openDirectory();
+          if (result.canceled || !result.filePaths[0]) {
+            return;
+          }
+          resolvedTargetDirectory = result.filePaths[0];
+        }
+
+        let fileCount = 0;
+        let folderCount = 0;
+        const preparedLocalFolders = new Set<string>();
+
+        const ensureLocalDirectory = async (dirPath: string) => {
+          if (preparedLocalFolders.has(dirPath)) {
+            return;
+          }
+          preparedLocalFolders.add(dirPath);
+          await window.electron!.localfs.createDirectory(dirPath);
+          folderCount += 1;
+        };
+
+        const queueEntry = async (
+          entry: RemoteFileItem,
+          remotePath: string,
+          localParentPath: string,
+          label: string
+        ) => {
+          const localTargetPath = joinLocalPath(localParentPath, entry.name);
+
+          if (entry.type === 'directory') {
+            await ensureLocalDirectory(localTargetPath);
+
+            const children = await sftpService.listFiles(host.id, remotePath);
+            for (const child of children) {
+              await queueEntry(
+                {
+                  name: child.name,
+                  type: normalizeRemoteType(child.type),
+                  size: child.size || 0,
+                  modifyTime: child.modifyTime || Date.now(),
+                },
+                joinRemotePath(remotePath, child.name),
+                localTargetPath,
+                `${label}/${child.name}`
+              );
+            }
+            return;
+          }
+
+          addTransfer({
+            name: label,
+            type: 'download',
+            hostId: host.id,
+            remotePath,
+            localPath: localTargetPath,
+          });
+          fileCount += 1;
+        };
+
+        for (const entry of entries) {
+          const remotePath = joinRemotePath(currentRemotePath, entry.name);
+          await queueEntry(entry, remotePath, resolvedTargetDirectory, entry.name);
+        }
+
+        if (folderCount > 0 && fileCount === 0 && currentLocalPath === resolvedTargetDirectory) {
+          await loadLocalFiles(currentLocalPath);
+        }
+
+        setFeedback(summarizeTransferQueue('download', fileCount, folderCount));
+      } catch (queueError: unknown) {
+        const message = queueError instanceof Error ? queueError.message : 'Unknown download error';
+        setError(`Download failed: ${message}`);
+      }
+    },
+    [addTransfer, currentLocalPath, currentRemotePath, host, loadLocalFiles]
+  );
+
+  const queueDownloadPaths = useCallback(
+    async (paths: string[], targetDirectory?: string) => {
+      const entries = paths
+        .map((path) => remoteEntriesByPath.get(path))
+        .filter((entry): entry is RemoteFileItem => Boolean(entry));
+
+      await queueDownloadEntries(entries, targetDirectory);
+    },
+    [queueDownloadEntries, remoteEntriesByPath]
+  );
 
   const handleLocalDoubleClick = (file: LocalFileItem) => {
     if (file.type === 'directory') {
@@ -505,20 +790,44 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
     openRemoteEditor(itemPath);
   };
 
-  const confirmCreateFolder = async () => {
+  const confirmCreateRemoteFolder = async () => {
     if (!host || !draftName.trim()) {
       return;
     }
+
     try {
       await sftpService.connect(host).catch(() => undefined);
       const remotePath = joinRemotePath(currentRemotePath, draftName.trim());
       await sftpService.createDirectory(host.id, remotePath);
       setFeedback(`Created folder ${draftName.trim()}`);
-      await loadRemoteFiles(currentRemotePath);
+      await loadRemoteFiles(currentRemotePath, [remotePath]);
     } catch (createError: unknown) {
       const message =
         createError instanceof Error ? createError.message : 'Unknown create-folder error';
       setError(`Create folder failed: ${message}`);
+    } finally {
+      setDraftName('');
+      setDialogMode(null);
+    }
+  };
+
+  const confirmCreateRemoteFile = async () => {
+    if (!host || !draftName.trim()) {
+      return;
+    }
+
+    const remotePath = joinRemotePath(currentRemotePath, draftName.trim());
+
+    try {
+      await sftpService.connect(host).catch(() => undefined);
+      await sftpService.writeFile(host.id, remotePath, '');
+      await loadRemoteFiles(currentRemotePath, [remotePath]);
+      await openRemoteEditor(remotePath);
+      setFeedback(`Created file ${draftName.trim()}`);
+    } catch (createError: unknown) {
+      const message =
+        createError instanceof Error ? createError.message : 'Unknown create-file error';
+      setError(`Create file failed: ${message}`);
     } finally {
       setDraftName('');
       setDialogMode(null);
@@ -530,11 +839,12 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
       return;
     }
 
+    const targetPath = joinLocalPath(currentLocalPath, draftName.trim());
+
     try {
-      const targetPath = joinLocalPath(currentLocalPath, draftName.trim());
       await window.electron.localfs.createDirectory(targetPath);
       setFeedback(`Created folder ${draftName.trim()}`);
-      await loadLocalFiles(currentLocalPath);
+      await loadLocalFiles(currentLocalPath, [targetPath]);
     } catch (createError: unknown) {
       const message =
         createError instanceof Error ? createError.message : 'Unknown local create-folder error';
@@ -554,7 +864,7 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
 
     try {
       await window.electron.localfs.createFile(targetPath);
-      await loadLocalFiles(currentLocalPath);
+      await loadLocalFiles(currentLocalPath, [targetPath]);
       await openLocalEditor(targetPath);
       setFeedback(`Created file ${draftName.trim()}`);
     } catch (createError: unknown) {
@@ -568,15 +878,22 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
   };
 
   const confirmRenameRemote = async () => {
-    if (!host || !itemToRename || !draftName.trim()) return;
+    if (!host || !itemToRename || !draftName.trim()) {
+      return;
+    }
 
     try {
       await sftpService.connect(host).catch(() => undefined);
       const parent = getRemoteParentPath(itemToRename.path);
       const newPath = joinRemotePath(parent, draftName.trim());
       await sftpService.rename(host.id, itemToRename.path, newPath);
+
+      if (editorPane === 'remote' && editorPath === itemToRename.path) {
+        setEditorPath(newPath);
+      }
+
       setFeedback(`Renamed to ${draftName.trim()}`);
-      await loadRemoteFiles(currentRemotePath);
+      await loadRemoteFiles(currentRemotePath, [newPath]);
     } catch (renameError: unknown) {
       const message = renameError instanceof Error ? renameError.message : 'Unknown rename error';
       setError(`Rename failed: ${message}`);
@@ -603,10 +920,8 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
 
       setFeedback(`Renamed to ${draftName.trim()}`);
       if (currentLocalPath) {
-        await loadLocalFiles(currentLocalPath);
+        await loadLocalFiles(currentLocalPath, [newPath]);
       }
-      setSelectedLocalPaths([newPath]);
-      setLocalAnchor(newPath);
     } catch (renameError: unknown) {
       const message = renameError instanceof Error ? renameError.message : 'Unknown rename error';
       setError(`Rename failed: ${message}`);
@@ -624,16 +939,23 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
 
     try {
       await sftpService.connect(host).catch(() => undefined);
+
       for (const selectedRemote of itemsToDelete) {
-        const remoteEntry = remoteFiles.find(
-          (file) => joinRemotePath(currentRemotePath, file.name) === selectedRemote
-        );
+        const remoteEntry = remoteEntriesByPath.get(selectedRemote);
         if (remoteEntry?.type === 'directory') {
           await sftpService.deleteDirectory(host.id, selectedRemote);
         } else {
           await sftpService.deleteFile(host.id, selectedRemote);
         }
       }
+
+      if (editorPane === 'remote' && editorPath && itemsToDelete.includes(editorPath)) {
+        setEditorPath(null);
+        setEditorPane(null);
+        setEditorContent('');
+        setEditorDirty(false);
+      }
+
       setSelectedRemotePaths([]);
       setFeedback(
         itemsToDelete.length === 1
@@ -674,77 +996,44 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
     return `${Math.round((bytes / 1024 ** index) * 100) / 100} ${units[index]}`;
   };
 
-  const selectedRemoteName =
-    selectedRemotePaths.length === 1 ? selectedRemotePaths[0].split('/').pop() : null;
-  const selectedLocalName =
-    selectedLocalPaths.length === 1 ? selectedLocalPaths[0].split(/[\\/]/).pop() : null;
-  const selectedLocalEntries = filteredLocalFiles.filter((file) =>
-    selectedLocalPaths.includes(file.path)
-  );
-  const selectedRemoteEntries = filteredRemoteFiles.filter((file) =>
-    selectedRemotePaths.includes(joinRemotePath(currentRemotePath, file.name))
-  );
-  const selectedLocalFilePaths = selectedLocalEntries
-    .filter((file) => file.type === 'file')
-    .map((file) => file.path);
-  const selectedRemoteFilePaths = selectedRemoteEntries
-    .filter((file) => file.type !== 'directory')
-    .map((file) => joinRemotePath(currentRemotePath, file.name));
-  const selectedRemoteFile =
-    selectedRemotePaths.length === 1
-      ? filteredRemoteFiles.find(
-          (file) => joinRemotePath(currentRemotePath, file.name) === selectedRemotePaths[0]
-        )
-      : null;
-  const selectedLocalFile =
-    selectedLocalPaths.length === 1
-      ? filteredLocalFiles.find((file) => file.path === selectedLocalPaths[0])
-      : null;
-  const contextLocalFile =
-    contextMenu?.pane === 'local' && contextMenu.itemPath
-      ? (filteredLocalFiles.find((file) => file.path === contextMenu.itemPath) ?? null)
-      : null;
-  const contextRemoteFile =
-    contextMenu?.pane === 'remote' && contextMenu.itemPath
-      ? (filteredRemoteFiles.find(
-          (file) => joinRemotePath(currentRemotePath, file.name) === contextMenu.itemPath
-        ) ?? null)
-      : null;
-  const editorLanguage = useMemo(
-    () => (editorPath ? resolveLanguage(editorPath) : []),
-    [editorPath]
-  );
+  const rootClassName = `sftp-view dual-pane ${variant === 'embedded' ? 'embedded' : 'session'}`;
 
   return (
-    <div className="sftp-view dual-pane">
-      <div className="sftp-toolbar">
-        <div className="sftp-toolbar-title">
-          <strong>{host ? `${host.username}@${host.address}` : 'Remote host not connected'}</strong>
-          <span>
-            {host
-              ? 'Local and remote workspace with explicit remote host selection'
-              : 'Browse local files first, then choose which saved host should power the remote pane'}
-          </span>
+    <div className={rootClassName}>
+      {variant === 'session' && (
+        <div className="sftp-toolbar">
+          <div className="sftp-toolbar-title">
+            <strong>
+              {host ? `${host.username}@${host.address}` : 'Remote host not connected'}
+            </strong>
+            <span>
+              {host
+                ? 'Unified local and remote workspace with matching actions in both session types'
+                : 'Browse local files first, then choose which saved host should power the remote pane'}
+            </span>
+          </div>
+          <div className="sftp-toolbar-actions">
+            <button
+              type="button"
+              onClick={() => host && loadRemoteFiles(currentRemotePath)}
+              disabled={!host}
+            >
+              <RefreshCw size={14} />
+              <span>Refresh Remote</span>
+            </button>
+            {hostPickerEnabled && (
+              <button type="button" onClick={() => setShowHostPicker(true)}>
+                <Server size={14} />
+                <span>{host ? 'Change Remote Host' : 'Choose Remote Host'}</span>
+              </button>
+            )}
+            <button type="button" onClick={chooseLocalDirectory}>
+              <HardDrive size={14} />
+              <span>Choose Local Folder</span>
+            </button>
+          </div>
         </div>
-        <div className="sftp-toolbar-actions">
-          <button
-            type="button"
-            onClick={() => host && loadRemoteFiles(currentRemotePath)}
-            disabled={!host}
-          >
-            <RefreshCw size={14} />
-            <span>Refresh Remote</span>
-          </button>
-          <button type="button" onClick={() => setShowHostPicker(true)}>
-            <Server size={14} />
-            <span>{host ? 'Change Remote Host' : 'Choose Remote Host'}</span>
-          </button>
-          <button type="button" onClick={chooseLocalDirectory}>
-            <HardDrive size={14} />
-            <span>Choose Local Folder</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {(feedback || error) && (
         <div className={`sftp-banner ${error ? 'error' : 'success'}`}>
@@ -770,14 +1059,15 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
             const remotePathsPayload = event.dataTransfer.getData(
               'application/x-terminuks-remote-list'
             );
+            const remotePath = event.dataTransfer.getData('application/x-terminuks-remote');
             const remotePaths = remotePathsPayload
               ? (JSON.parse(remotePathsPayload) as string[])
-              : [];
-            const remotePath = event.dataTransfer.getData('application/x-terminuks-remote');
-            const pathsToDownload =
-              remotePaths.length > 0 ? remotePaths : remotePath ? [remotePath] : [];
-            if (pathsToDownload.length > 0 && currentLocalPath) {
-              downloadRemoteFiles(pathsToDownload, currentLocalPath);
+              : remotePath
+                ? [remotePath]
+                : [];
+
+            if (remotePaths.length > 0 && currentLocalPath) {
+              queueDownloadPaths(remotePaths, currentLocalPath);
             }
           }}
           onClick={() => setSelectedLocalPaths([])}
@@ -793,11 +1083,11 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   className="pane-path-input"
                   defaultValue={currentLocalPath || ''}
                   onBlur={() => setEditingPath(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      loadLocalFiles(e.currentTarget.value);
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      loadLocalFiles(event.currentTarget.value);
                       setEditingPath(null);
-                    } else if (e.key === 'Escape') {
+                    } else if (event.key === 'Escape') {
                       setEditingPath(null);
                     }
                   }}
@@ -809,6 +1099,9 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
               )}
             </div>
             <div className="pane-header-actions">
+              <button type="button" onClick={chooseLocalDirectory} title="Choose local folder">
+                <HardDrive size={14} />
+              </button>
               <button
                 type="button"
                 disabled={!currentLocalPath}
@@ -823,6 +1116,7 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                 onClick={() =>
                   currentLocalPath && loadLocalFiles(getLocalParentPath(currentLocalPath))
                 }
+                title="Go to parent folder"
               >
                 <ArrowUp size={14} />
               </button>
@@ -862,21 +1156,16 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   key={file.path}
                   type="button"
                   className={`pane-item ${selectedLocalPaths.includes(file.path) ? 'active' : ''}`}
-                  draggable={file.type === 'file'}
+                  draggable
                   onDragStart={(event) => {
-                    const draggedPaths =
-                      file.type === 'file' && selectedLocalFilePaths.includes(file.path)
-                        ? selectedLocalFilePaths
-                        : file.type === 'file'
-                          ? [file.path]
-                          : [];
-                    if (draggedPaths.length > 0) {
-                      event.dataTransfer.setData('application/x-terminuks-local', file.path);
-                      event.dataTransfer.setData(
-                        'application/x-terminuks-local-list',
-                        JSON.stringify(draggedPaths)
-                      );
-                    }
+                    const draggedPaths = selectedLocalPaths.includes(file.path)
+                      ? selectedLocalPaths
+                      : [file.path];
+                    event.dataTransfer.setData('application/x-terminuks-local', file.path);
+                    event.dataTransfer.setData(
+                      'application/x-terminuks-local-list',
+                      JSON.stringify(draggedPaths)
+                    );
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -921,11 +1210,15 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
             const localPathsPayload = event.dataTransfer.getData(
               'application/x-terminuks-local-list'
             );
-            const localPaths = localPathsPayload ? (JSON.parse(localPathsPayload) as string[]) : [];
             const localPath = event.dataTransfer.getData('application/x-terminuks-local');
-            const pathsToUpload = localPaths.length > 0 ? localPaths : localPath ? [localPath] : [];
-            if (pathsToUpload.length > 0 && host) {
-              uploadLocalFiles(pathsToUpload);
+            const localPaths = localPathsPayload
+              ? (JSON.parse(localPathsPayload) as string[])
+              : localPath
+                ? [localPath]
+                : [];
+
+            if (localPaths.length > 0) {
+              queueUploadPaths(localPaths);
             }
           }}
           onClick={() => setSelectedRemotePaths([])}
@@ -941,11 +1234,11 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   className="pane-path-input"
                   defaultValue={currentRemotePath}
                   onBlur={() => setEditingPath(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      setCurrentRemotePath(e.currentTarget.value);
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      setCurrentRemotePath(event.currentTarget.value);
                       setEditingPath(null);
-                    } else if (e.key === 'Escape') {
+                    } else if (event.key === 'Escape') {
                       setEditingPath(null);
                     }
                   }}
@@ -967,28 +1260,50 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                 type="button"
                 disabled={currentRemotePath === '/' || !host}
                 onClick={() => setCurrentRemotePath(getRemoteParentPath(currentRemotePath))}
+                title="Go to parent folder"
               >
                 <ArrowUp size={14} />
               </button>
-              <button type="button" disabled={!host} onClick={() => setDialogMode('create-folder')}>
-                <FolderPlus size={14} />
-              </button>
-              <button type="button" onClick={() => setShowHostPicker(true)}>
-                <Server size={14} />
+              <button
+                type="button"
+                disabled={!host}
+                onClick={() => setDialogMode('create-remote-file')}
+                title="New remote file"
+              >
+                <FilePlus2 size={14} />
               </button>
               <button
                 type="button"
-                disabled={selectedRemoteFilePaths.length === 0 || !host}
+                disabled={!host}
+                onClick={() => setDialogMode('create-remote-folder')}
+                title="New remote folder"
+              >
+                <FolderPlus size={14} />
+              </button>
+              {hostPickerEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setShowHostPicker(true)}
+                  title={host ? 'Change remote host' : 'Choose remote host'}
+                >
+                  <Server size={14} />
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={selectedRemoteEntries.length === 0 || !host || !currentLocalPath}
                 onClick={() =>
-                  currentLocalPath && downloadRemoteFiles(selectedRemoteFilePaths, currentLocalPath)
+                  currentLocalPath && queueDownloadEntries(selectedRemoteEntries, currentLocalPath)
                 }
+                title="Download selection"
               >
                 <Download size={14} />
               </button>
               <button
                 type="button"
-                disabled={selectedLocalFilePaths.length === 0 || !host}
-                onClick={() => uploadLocalFiles(selectedLocalFilePaths)}
+                disabled={selectedLocalEntries.length === 0 || !host}
+                onClick={() => queueUploadEntries(selectedLocalEntries)}
+                title="Upload selection"
               >
                 <Upload size={14} />
               </button>
@@ -999,6 +1314,7 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   setItemsToDelete([...selectedRemotePaths]);
                   setDialogMode('delete-remote');
                 }}
+                title="Delete selection"
               >
                 <Trash2 size={14} />
               </button>
@@ -1017,15 +1333,21 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
             {!host ? (
               <div className="workspace-empty">
                 <strong>Remote side is disconnected</strong>
-                <span>Use the server button above to pick from all saved hosts.</span>
-                <button
-                  type="button"
-                  className="sftp-inline-picker-btn"
-                  onClick={() => setShowHostPicker(true)}
-                >
-                  <Server size={14} />
-                  <span>Choose Remote Host</span>
-                </button>
+                <span>
+                  {hostPickerEnabled
+                    ? 'Use the server button above to pick from all saved hosts.'
+                    : 'Attach this workspace to a host to browse remote files.'}
+                </span>
+                {hostPickerEnabled && (
+                  <button
+                    type="button"
+                    className="sftp-inline-picker-btn"
+                    onClick={() => setShowHostPicker(true)}
+                  >
+                    <Server size={14} />
+                    <span>Choose Remote Host</span>
+                  </button>
+                )}
               </div>
             ) : loadingRemote ? (
               <div className="sftp-skeleton-list">{renderSkeletonRows('remote')}</div>
@@ -1039,21 +1361,16 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                     key={filePath}
                     type="button"
                     className={`pane-item ${selectedRemotePaths.includes(filePath) ? 'active' : ''}`}
-                    draggable={file.type !== 'directory'}
+                    draggable
                     onDragStart={(event) => {
-                      const draggedPaths =
-                        file.type !== 'directory' && selectedRemoteFilePaths.includes(filePath)
-                          ? selectedRemoteFilePaths
-                          : file.type !== 'directory'
-                            ? [filePath]
-                            : [];
-                      if (draggedPaths.length > 0) {
-                        event.dataTransfer.setData('application/x-terminuks-remote', filePath);
-                        event.dataTransfer.setData(
-                          'application/x-terminuks-remote-list',
-                          JSON.stringify(draggedPaths)
-                        );
-                      }
+                      const draggedPaths = selectedRemotePaths.includes(filePath)
+                        ? selectedRemotePaths
+                        : [filePath];
+                      event.dataTransfer.setData('application/x-terminuks-remote', filePath);
+                      event.dataTransfer.setData(
+                        'application/x-terminuks-remote-list',
+                        JSON.stringify(draggedPaths)
+                      );
                     }}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1143,35 +1460,17 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   <span>Rename</span>
                 </button>
               )}
-              {contextMenu.itemPath && (
+              {contextLocalEntries.length > 0 && (
                 <button
                   type="button"
                   className="sftp-context-item"
                   onClick={() => {
-                    const pathsToUpload =
-                      selectedLocalPaths.includes(contextMenu.itemPath) &&
-                      selectedLocalFilePaths.length > 0
-                        ? selectedLocalFilePaths
-                        : contextLocalFile?.type === 'file'
-                          ? [contextLocalFile.path]
-                          : [];
-                    uploadLocalFiles(pathsToUpload);
+                    queueUploadEntries(contextLocalEntries);
                     setContextMenu(null);
                   }}
-                  disabled={
-                    !contextLocalFile ||
-                    (contextLocalFile.type !== 'file' &&
-                      (!selectedLocalPaths.includes(contextMenu.itemPath) ||
-                        selectedLocalFilePaths.length === 0))
-                  }
                 >
                   <Upload size={14} />
-                  <span>
-                    {selectedLocalPaths.includes(contextMenu.itemPath) &&
-                    selectedLocalFilePaths.length > 1
-                      ? 'Upload Selected'
-                      : 'Upload'}
-                  </span>
+                  <span>{contextLocalEntries.length > 1 ? 'Upload Selected' : 'Upload'}</span>
                 </button>
               )}
               <button
@@ -1232,7 +1531,7 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   className="sftp-context-item"
                   onClick={() => {
                     setCurrentRemotePath(contextMenu.itemPath!);
-                    setTimeout(() => setContextMenu(null), 10);
+                    setContextMenu(null);
                   }}
                 >
                   <FolderOpen size={14} />
@@ -1272,45 +1571,78 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
                   <span>Rename</span>
                 </button>
               )}
-              {selectedRemotePaths.length > 0 && (
+              {contextRemoteEntries.length > 0 && (
                 <button
                   type="button"
                   className="sftp-context-item"
                   onClick={() => {
                     if (currentLocalPath) {
-                      downloadRemoteFiles(selectedRemoteFilePaths, currentLocalPath);
+                      queueDownloadEntries(contextRemoteEntries, currentLocalPath);
                     }
                     setContextMenu(null);
                   }}
-                  disabled={selectedRemoteFilePaths.length === 0}
+                  disabled={!currentLocalPath}
                 >
                   <Download size={14} />
-                  <span>{selectedRemotePaths.length > 1 ? 'Download Selected' : 'Download'}</span>
+                  <span>{contextRemoteEntries.length > 1 ? 'Download Selected' : 'Download'}</span>
                 </button>
               )}
               <button
                 type="button"
                 className="sftp-context-item"
                 onClick={() => {
-                  setDialogMode('create-folder');
+                  if (host) {
+                    loadRemoteFiles(currentRemotePath);
+                  }
                   setContextMenu(null);
                 }}
+                disabled={!host}
+              >
+                <RefreshCw size={14} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                className="sftp-context-item"
+                onClick={() => {
+                  setDialogMode('create-remote-file');
+                  setContextMenu(null);
+                }}
+                disabled={!host}
+              >
+                <FilePlus2 size={14} />
+                <span>New File</span>
+              </button>
+              <button
+                type="button"
+                className="sftp-context-item"
+                onClick={() => {
+                  setDialogMode('create-remote-folder');
+                  setContextMenu(null);
+                }}
+                disabled={!host}
               >
                 <FolderPlus size={14} />
                 <span>New Folder</span>
               </button>
-              {selectedRemotePaths.length > 0 && (
+              {contextRemoteEntries.length > 0 && (
                 <button
                   type="button"
                   className="sftp-context-item danger"
                   onClick={() => {
-                    setItemsToDelete([...selectedRemotePaths]);
+                    const paths =
+                      contextMenu.itemPath && selectedRemotePaths.includes(contextMenu.itemPath)
+                        ? [...selectedRemotePaths]
+                        : contextMenu.itemPath
+                          ? [contextMenu.itemPath]
+                          : [];
+                    setItemsToDelete(paths);
                     setDialogMode('delete-remote');
                     setContextMenu(null);
                   }}
                 >
                   <Trash2 size={14} />
-                  <span>{selectedRemotePaths.length > 1 ? 'Delete Selected' : 'Delete'}</span>
+                  <span>{contextRemoteEntries.length > 1 ? 'Delete Selected' : 'Delete'}</span>
                 </button>
               )}
             </>
@@ -1361,23 +1693,28 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
         </AppDialog>
       )}
 
-      {(dialogMode === 'create-folder' ||
-        dialogMode === 'create-local-folder' ||
-        dialogMode === 'create-local-file') && (
+      {(dialogMode === 'create-remote-file' ||
+        dialogMode === 'create-remote-folder' ||
+        dialogMode === 'create-local-file' ||
+        dialogMode === 'create-local-folder') && (
         <AppDialog
           title={
-            dialogMode === 'create-folder'
-              ? 'Create Remote Folder'
-              : dialogMode === 'create-local-folder'
-                ? 'Create Local Folder'
-                : 'Create Local File'
+            dialogMode === 'create-remote-file'
+              ? 'Create Remote File'
+              : dialogMode === 'create-remote-folder'
+                ? 'Create Remote Folder'
+                : dialogMode === 'create-local-file'
+                  ? 'Create Local File'
+                  : 'Create Local Folder'
           }
           description={
-            dialogMode === 'create-folder'
-              ? 'Add a remote directory in the current path.'
-              : dialogMode === 'create-local-folder'
-                ? 'Add a local directory in the current path.'
-                : 'Create a local file in the current path.'
+            dialogMode === 'create-remote-file'
+              ? 'Create a remote file in the current directory.'
+              : dialogMode === 'create-remote-folder'
+                ? 'Create a remote folder in the current directory.'
+                : dialogMode === 'create-local-file'
+                  ? 'Create a local file in the current directory.'
+                  : 'Create a local folder in the current directory.'
           }
           onClose={() => {
             setDialogMode(null);
@@ -1390,15 +1727,26 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
               autoFocus
               value={draftName}
               onChange={(event) => setDraftName(event.target.value)}
-              placeholder={dialogMode === 'create-local-file' ? 'notes.txt' : 'new-folder'}
-              onKeyDown={(e) =>
-                e.key === 'Enter' &&
-                (dialogMode === 'create-folder'
-                  ? confirmCreateFolder()
-                  : dialogMode === 'create-local-folder'
-                    ? confirmCreateLocalFolder()
-                    : confirmCreateLocalFile())
+              placeholder={
+                dialogMode === 'create-remote-file' || dialogMode === 'create-local-file'
+                  ? 'notes.txt'
+                  : 'new-folder'
               }
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') {
+                  return;
+                }
+
+                if (dialogMode === 'create-remote-file') {
+                  confirmCreateRemoteFile();
+                } else if (dialogMode === 'create-remote-folder') {
+                  confirmCreateRemoteFolder();
+                } else if (dialogMode === 'create-local-file') {
+                  confirmCreateLocalFile();
+                } else {
+                  confirmCreateLocalFolder();
+                }
+              }}
             />
             <div className="sftp-dialog-actions">
               <button
@@ -1411,13 +1759,17 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
               <button
                 type="button"
                 className="sftp-dialog-primary"
-                onClick={() =>
-                  dialogMode === 'create-folder'
-                    ? confirmCreateFolder()
-                    : dialogMode === 'create-local-folder'
-                      ? confirmCreateLocalFolder()
-                      : confirmCreateLocalFile()
-                }
+                onClick={() => {
+                  if (dialogMode === 'create-remote-file') {
+                    confirmCreateRemoteFile();
+                  } else if (dialogMode === 'create-remote-folder') {
+                    confirmCreateRemoteFolder();
+                  } else if (dialogMode === 'create-local-file') {
+                    confirmCreateLocalFile();
+                  } else {
+                    confirmCreateLocalFolder();
+                  }
+                }}
               >
                 Create
               </button>
@@ -1426,9 +1778,9 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
         </AppDialog>
       )}
 
-      {dialogMode === 'rename-remote' && (
+      {(dialogMode === 'rename-remote' || dialogMode === 'rename-local') && (
         <AppDialog
-          title="Rename Remote Item"
+          title={dialogMode === 'rename-remote' ? 'Rename Remote Item' : 'Rename Local Item'}
           description="Enter a new name for the file or folder."
           onClose={() => {
             setDialogMode(null);
@@ -1443,7 +1795,15 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
               value={draftName}
               onChange={(event) => setDraftName(event.target.value)}
               placeholder="New name"
-              onKeyDown={(e) => e.key === 'Enter' && confirmRenameRemote()}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  if (dialogMode === 'rename-remote') {
+                    confirmRenameRemote();
+                  } else {
+                    confirmRenameLocal();
+                  }
+                }
+              }}
             />
             <div className="sftp-dialog-actions">
               <button
@@ -1453,42 +1813,17 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
               >
                 Cancel
               </button>
-              <button type="button" className="sftp-dialog-primary" onClick={confirmRenameRemote}>
-                Rename
-              </button>
-            </div>
-          </div>
-        </AppDialog>
-      )}
-
-      {dialogMode === 'rename-local' && (
-        <AppDialog
-          title="Rename Local Item"
-          description="Enter a new name for the file or folder."
-          onClose={() => {
-            setDialogMode(null);
-            setDraftName('');
-            setItemToRename(null);
-          }}
-        >
-          <div className="sftp-dialog-body">
-            <input
-              type="text"
-              autoFocus
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              placeholder="New name"
-              onKeyDown={(e) => e.key === 'Enter' && confirmRenameLocal()}
-            />
-            <div className="sftp-dialog-actions">
               <button
                 type="button"
-                className="sftp-dialog-cancel"
-                onClick={() => setDialogMode(null)}
+                className="sftp-dialog-primary"
+                onClick={() => {
+                  if (dialogMode === 'rename-remote') {
+                    confirmRenameRemote();
+                  } else {
+                    confirmRenameLocal();
+                  }
+                }}
               >
-                Cancel
-              </button>
-              <button type="button" className="sftp-dialog-primary" onClick={confirmRenameLocal}>
                 Rename
               </button>
             </div>
@@ -1513,27 +1848,50 @@ const SFTPView = ({ sessionId }: SFTPViewProps) => {
         </p>
       </AlertDialog>
 
-      {showHostPicker && (
+      {hostPickerEnabled && showHostPicker && (
         <SessionLauncherDialog
           mode="sftp"
-          hosts={hosts}
+          hosts={hostPickerHosts}
           onClose={() => setShowHostPicker(false)}
           onSelectHost={(selectedHost) => {
-            updateSession(sessionId, {
-              hostId: selectedHost.id,
-              title: `${selectedHost.name} SFTP`,
-              status: 'idle',
-              lastError: undefined,
-            });
-            setCurrentRemotePath('/');
-            setRemoteFiles([]);
-            setSelectedRemotePaths([]);
-            setError(null);
+            onSelectHost?.(selectedHost);
             setShowHostPicker(false);
+            setError(null);
           }}
         />
       )}
     </div>
+  );
+};
+
+const SFTPView = ({ sessionId }: SFTPViewProps) => {
+  const { getHost, hosts } = useHosts();
+  const { getSession, updateSession } = useTerminal();
+  const session = getSession(sessionId);
+  const host = session?.hostId ? getHost(session.hostId) : undefined;
+
+  return (
+    <DualPaneSFTPWorkspace
+      host={host}
+      variant="session"
+      hostPickerHosts={hosts}
+      onSelectHost={(selectedHost) => {
+        updateSession(sessionId, {
+          hostId: selectedHost.id,
+          title: `${selectedHost.name} SFTP`,
+          status: 'idle',
+          lastError: undefined,
+        });
+      }}
+      onRemoteStateChange={(status, message) => {
+        updateSession(
+          sessionId,
+          status === 'connected'
+            ? { status: 'connected', lastError: undefined }
+            : { status: 'error', lastError: message }
+        );
+      }}
+    />
   );
 };
 

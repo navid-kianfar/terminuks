@@ -35,6 +35,16 @@ const createSftpConfig = (hostConfig: any) => {
 
 ipcMain.handle('sftp:connect', async (_, hostConfig: any) => {
   const existingClient = clients.get(hostConfig.id);
+  const existingConfig = configs.get(hostConfig.id);
+
+  if (
+    existingClient &&
+    existingConfig &&
+    JSON.stringify(existingConfig) === JSON.stringify(hostConfig)
+  ) {
+    return { success: true };
+  }
+
   if (existingClient) {
     try {
       await existingClient.end();
@@ -61,7 +71,10 @@ ipcMain.handle('sftp:disconnect', async (_, hostId: string) => {
   configs.delete(hostId);
 });
 
-const withClient = async <T>(hostId: string, operation: (client: any) => Promise<T>): Promise<T> => {
+const withClient = async <T>(
+  hostId: string,
+  operation: (client: any) => Promise<T>
+): Promise<T> => {
   const runOperation = async () => {
     const client = clients.get(hostId);
     if (!client) {
@@ -93,31 +106,37 @@ ipcMain.handle('sftp:list', async (_, hostId: string, remotePath: string) => {
   return withClient(hostId, async (client) => client.list(remotePath));
 });
 
-ipcMain.handle('sftp:download', async (event, hostId: string, remotePath: string, localPath: string, transferId?: string) => {
-  await withClient(hostId, async (client) => {
-    const options: any = {};
-    if (transferId) {
-      options.step = (total: number, _chunk: number, totalSize: number) => {
-        const progress = Math.round((total / totalSize) * 100);
-        event.sender.send('sftp:progress', { transferId, progress });
-      };
-    }
-    return client.fastGet(remotePath, localPath, options);
-  });
-});
+ipcMain.handle(
+  'sftp:download',
+  async (event, hostId: string, remotePath: string, localPath: string, transferId?: string) => {
+    await withClient(hostId, async (client) => {
+      const options: any = {};
+      if (transferId) {
+        options.step = (total: number, _chunk: number, totalSize: number) => {
+          const progress = Math.round((total / totalSize) * 100);
+          event.sender.send('sftp:progress', { transferId, progress });
+        };
+      }
+      return client.fastGet(remotePath, localPath, options);
+    });
+  }
+);
 
-ipcMain.handle('sftp:upload', async (event, hostId: string, localPath: string, remotePath: string, transferId?: string) => {
-  await withClient(hostId, async (client) => {
-    const options: any = {};
-    if (transferId) {
-      options.step = (total: number, _chunk: number, totalSize: number) => {
-        const progress = Math.round((total / totalSize) * 100);
-        event.sender.send('sftp:progress', { transferId, progress });
-      };
-    }
-    return client.fastPut(localPath, remotePath, options);
-  });
-});
+ipcMain.handle(
+  'sftp:upload',
+  async (event, hostId: string, localPath: string, remotePath: string, transferId?: string) => {
+    await withClient(hostId, async (client) => {
+      const options: any = {};
+      if (transferId) {
+        options.step = (total: number, _chunk: number, totalSize: number) => {
+          const progress = Math.round((total / totalSize) * 100);
+          event.sender.send('sftp:progress', { transferId, progress });
+        };
+      }
+      return client.fastPut(localPath, remotePath, options);
+    });
+  }
+);
 
 ipcMain.handle('sftp:delete', async (_, hostId: string, remotePath: string) => {
   await withClient(hostId, async (client) => client.delete(remotePath));
