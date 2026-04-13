@@ -1,6 +1,6 @@
 {
   "name": "terminuks",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Free and open-source SSH/SFTP client - A Termius alternative",
   "main": "dist-electron/main.js",
   "author": {
