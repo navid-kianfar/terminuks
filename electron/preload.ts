@@ -113,6 +113,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('sftp:rmdir', hostId, remotePath),
     rename: (hostId: string, oldPath: string, newPath: string) =>
       ipcRenderer.invoke('sftp:rename', hostId, oldPath, newPath),
+    exec: (hostId: string, command: string) => ipcRenderer.invoke('sftp:exec', hostId, command),
     stat: (hostId: string, remotePath: string) =>
       ipcRenderer.invoke('sftp:stat', hostId, remotePath),
     readFile: (hostId: string, remotePath: string) =>

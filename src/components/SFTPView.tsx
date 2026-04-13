@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import {
+  Archive,
   ArrowUp,
   Download,
   File,
@@ -9,6 +10,7 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
+  PackageOpen,
   Pencil,
   RefreshCw,
   Save,
@@ -173,6 +175,64 @@ const summarizeTransferQueue = (
   }
 
   return `Queued ${direction} for ${parts.join(' and ')}`;
+};
+
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+const getTimestampSuffix = () => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
+    now.getHours()
+  )}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+};
+
+const getArchiveName = (names: string[]) => {
+  if (names.length === 1) {
+    return `${names[0]}.tar.gz`;
+  }
+
+  return `archive-${getTimestampSuffix()}.tar.gz`;
+};
+
+const getCompressedFileKind = (name: string) => {
+  const normalized = name.toLowerCase();
+
+  if (normalized.endsWith('.tar.gz') || normalized.endsWith('.tgz')) {
+    return 'tar.gz';
+  }
+  if (normalized.endsWith('.tar')) {
+    return 'tar';
+  }
+  if (normalized.endsWith('.zip')) {
+    return 'zip';
+  }
+  if (normalized.endsWith('.gz')) {
+    return 'gz';
+  }
+
+  return null;
+};
+
+const buildRemoteDecompressCommand = (archiveName: string) => {
+  const kind = getCompressedFileKind(archiveName);
+  if (!kind) {
+    return null;
+  }
+
+  const quotedArchive = shellQuote(archiveName);
+
+  if (kind === 'tar.gz') {
+    return `tar -xzf ${quotedArchive}`;
+  }
+  if (kind === 'tar') {
+    return `tar -xf ${quotedArchive}`;
+  }
+  if (kind === 'zip') {
+    return `unzip -oq ${quotedArchive}`;
+  }
+
+  return `gunzip -kf ${quotedArchive}`;
 };
 
 export const DualPaneSFTPWorkspace = ({
@@ -972,6 +1032,63 @@ export const DualPaneSFTPWorkspace = ({
     }
   };
 
+  const compressRemoteEntries = useCallback(
+    async (entries: RemoteFileItem[]) => {
+      if (!host || entries.length === 0) {
+        return;
+      }
+
+      const archiveName = getArchiveName(entries.map((entry) => entry.name));
+      const command = [
+        `cd ${shellQuote(currentRemotePath)}`,
+        `tar -czf ${shellQuote(archiveName)} -- ${entries.map((entry) => shellQuote(entry.name)).join(' ')}`,
+      ].join(' && ');
+
+      try {
+        setError(null);
+        await sftpService.connect(host).catch(() => undefined);
+        await sftpService.exec(host.id, command);
+        const archivePath = joinRemotePath(currentRemotePath, archiveName);
+        setFeedback(`Created archive ${archiveName}`);
+        await loadRemoteFiles(currentRemotePath, [archivePath]);
+      } catch (compressError: unknown) {
+        const message =
+          compressError instanceof Error ? compressError.message : 'Unknown compression error';
+        setError(`Compress failed: ${message}`);
+      }
+    },
+    [currentRemotePath, host, loadRemoteFiles]
+  );
+
+  const decompressRemoteEntry = useCallback(
+    async (entry: RemoteFileItem) => {
+      if (!host) {
+        return;
+      }
+
+      const command = buildRemoteDecompressCommand(entry.name);
+      if (!command) {
+        setError('Decompress is only available for supported compressed files.');
+        return;
+      }
+
+      try {
+        setError(null);
+        await sftpService.connect(host).catch(() => undefined);
+        await sftpService.exec(host.id, `cd ${shellQuote(currentRemotePath)} && ${command}`);
+        setFeedback(`Decompressed ${entry.name}`);
+        await loadRemoteFiles(currentRemotePath);
+      } catch (decompressError: unknown) {
+        const message =
+          decompressError instanceof Error
+            ? decompressError.message
+            : 'Unknown decompression error';
+        setError(`Decompress failed: ${message}`);
+      }
+    },
+    [currentRemotePath, host, loadRemoteFiles]
+  );
+
   const openContextMenu = (
     event: React.MouseEvent,
     pane: PaneType,
@@ -1571,6 +1688,34 @@ export const DualPaneSFTPWorkspace = ({
                   <span>Rename</span>
                 </button>
               )}
+              {contextRemoteEntries.length > 0 && (
+                <button
+                  type="button"
+                  className="sftp-context-item"
+                  onClick={() => {
+                    compressRemoteEntries(contextRemoteEntries);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Archive size={14} />
+                  <span>{contextRemoteEntries.length > 1 ? 'Compress Selected' : 'Compress'}</span>
+                </button>
+              )}
+              {contextRemoteEntries.length === 1 &&
+                contextRemoteEntries[0].type === 'file' &&
+                getCompressedFileKind(contextRemoteEntries[0].name) && (
+                  <button
+                    type="button"
+                    className="sftp-context-item"
+                    onClick={() => {
+                      decompressRemoteEntry(contextRemoteEntries[0]);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <PackageOpen size={14} />
+                    <span>Decompress</span>
+                  </button>
+                )}
               {contextRemoteEntries.length > 0 && (
                 <button
                   type="button"

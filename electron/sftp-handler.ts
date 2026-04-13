@@ -154,6 +154,44 @@ ipcMain.handle('sftp:rename', async (_, hostId: string, oldPath: string, newPath
   await withClient(hostId, async (client) => client.rename(oldPath, newPath));
 });
 
+ipcMain.handle('sftp:exec', async (_, hostId: string, command: string) => {
+  return withClient(
+    hostId,
+    async (client) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        client.client.exec(command, (err: Error | undefined, stream: any) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          let stdout = '';
+          let stderr = '';
+
+          stream.on('data', (data: Buffer) => {
+            stdout += data.toString();
+          });
+
+          stream.stderr.on('data', (data: Buffer) => {
+            stderr += data.toString();
+          });
+
+          stream.on('close', (code: number | undefined) => {
+            if (code && code !== 0) {
+              reject(new Error(stderr.trim() || `Remote command failed with exit code ${code}`));
+              return;
+            }
+
+            resolve({
+              stdout: stdout.trim(),
+              stderr: stderr.trim(),
+            });
+          });
+        });
+      })
+  );
+});
+
 ipcMain.handle('sftp:stat', async (_, hostId: string, remotePath: string) => {
   return withClient(hostId, async (client) => client.stat(remotePath));
 });

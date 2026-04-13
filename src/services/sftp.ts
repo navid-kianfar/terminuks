@@ -81,6 +81,13 @@ class SFTPService {
     await window.electron.sftp.rename(hostId, oldPath, newPath);
   }
 
+  async exec(hostId: string, command: string): Promise<{ stdout: string; stderr: string }> {
+    if (!window.electron) {
+      throw new Error('Electron API not available');
+    }
+    return window.electron.sftp.exec(hostId, command);
+  }
+
   async getFileInfo(hostId: string, remotePath: string): Promise<SFTPFile> {
     if (!window.electron) {
       throw new Error('Electron API not available');

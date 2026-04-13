@@ -101,6 +101,7 @@ interface Window {
       mkdir: (hostId: string, remotePath: string) => Promise<void>;
       rmdir: (hostId: string, remotePath: string) => Promise<void>;
       rename: (hostId: string, oldPath: string, newPath: string) => Promise<void>;
+      exec: (hostId: string, command: string) => Promise<{ stdout: string; stderr: string }>;
       stat: (hostId: string, remotePath: string) => Promise<PersistedValue>;
       readFile: (hostId: string, remotePath: string) => Promise<string>;
       writeFile: (hostId: string, remotePath: string, content: string) => Promise<void>;
