@@ -10,6 +10,16 @@ interface SSHConnection {
   streams: Map<string, any>;
 }
 
+type SSHConnectResult =
+  | { success: true }
+  | {
+      success: false;
+      code: 'HOST_VERIFICATION_REQUIRED';
+      fingerprint: string;
+      host: string;
+      port: number;
+    };
+
 const connections = new Map<string, SSHConnection>();
 const trustedHostsPath = path.join(app.getPath('userData'), 'storage', 'trusted-hosts.json');
 
@@ -47,9 +57,24 @@ ipcMain.handle('ssh:connect', async (_, hostConfig: any) => {
     connections.delete(hostConfig.id);
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise<SSHConnectResult>((resolve, reject) => {
     const client = new Client();
     let pendingFingerprint: string | null = null;
+    let settled = false;
+    const resolveOnce = (value: SSHConnectResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+    const rejectOnce = (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
     const config: any = {
       host: hostConfig.address,
       port: hostConfig.port || 22,
@@ -87,11 +112,11 @@ ipcMain.handle('ssh:connect', async (_, hostConfig: any) => {
           config.passphrase = hostConfig.passphrase;
         }
       } catch (error: any) {
-        reject(new Error(`Failed to read key file: ${error.message}`));
+        rejectOnce(new Error(`Failed to read key file: ${error.message}`));
         return;
       }
     } else {
-      reject(new Error('No valid authentication method configured'));
+      rejectOnce(new Error('No valid authentication method configured'));
       return;
     }
 
@@ -104,7 +129,7 @@ ipcMain.handle('ssh:connect', async (_, hostConfig: any) => {
     client.on('ready', () => {
       connection.connected = true;
       connections.set(hostConfig.id, connection);
-      resolve({ success: true });
+      resolveOnce({ success: true });
     });
 
     client.on('close', () => {
@@ -121,22 +146,23 @@ ipcMain.handle('ssh:connect', async (_, hostConfig: any) => {
       console.error(`[SSH] Connection error for ${hostConfig.address}:`, err);
       connection.connected = false;
       if (pendingFingerprint) {
-        const verificationError = new Error(`The authenticity of ${hostConfig.address} can't be established.`);
-        (verificationError as any).code = 'HOST_VERIFICATION_REQUIRED';
-        (verificationError as any).fingerprint = pendingFingerprint;
-        (verificationError as any).host = hostConfig.address;
-        (verificationError as any).port = hostConfig.port || 22;
-        reject(verificationError);
+        resolveOnce({
+          success: false,
+          code: 'HOST_VERIFICATION_REQUIRED',
+          fingerprint: pendingFingerprint,
+          host: hostConfig.address,
+          port: hostConfig.port || 22,
+        });
         return;
       }
-      reject(err);
+      rejectOnce(err);
     });
 
     try {
       client.connect(config);
     } catch (err) {
       console.error(`[SSH] Synchronous connection failure for ${hostConfig.address}:`, err);
-      reject(err instanceof Error ? err : new Error(String(err)));
+      rejectOnce(err instanceof Error ? err : new Error(String(err)));
     }
   });
 });

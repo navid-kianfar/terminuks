@@ -12,6 +12,20 @@ export interface SSHHostVerificationError extends Error {
   port: number;
 }
 
+interface SSHConnectResultSuccess {
+  success: true;
+}
+
+interface SSHConnectResultVerificationRequired {
+  success: false;
+  code: 'HOST_VERIFICATION_REQUIRED';
+  fingerprint: string;
+  host: string;
+  port: number;
+}
+
+type SSHConnectResult = SSHConnectResultSuccess | SSHConnectResultVerificationRequired;
+
 class SSHService {
   private connections: Map<string, SSHConnection> = new Map();
 
@@ -21,7 +35,18 @@ class SSHService {
     }
 
     try {
-      await window.electron.ssh.connect(host);
+      const result = (await window.electron.ssh.connect(host)) as SSHConnectResult;
+      if (!result.success && result.code === 'HOST_VERIFICATION_REQUIRED') {
+        const trustError = new Error(
+          `The authenticity of ${result.host} can't be established.`
+        ) as SSHHostVerificationError;
+        trustError.code = 'HOST_VERIFICATION_REQUIRED';
+        trustError.fingerprint = result.fingerprint;
+        trustError.host = result.host;
+        trustError.port = result.port;
+        throw trustError;
+      }
+
       this.connections.set(host.id, {
         connected: true,
         host,
@@ -32,16 +57,30 @@ class SSHService {
       if (
         errObj &&
         typeof errObj === 'object' &&
-        (errObj.code === 'HOST_VERIFICATION_REQUIRED' || 
-         (errObj.message && errObj.message.includes('HOST_VERIFICATION_REQUIRED')))
+        (errObj.code === 'HOST_VERIFICATION_REQUIRED' ||
+          (errObj.message && errObj.message.includes('HOST_VERIFICATION_REQUIRED')))
       ) {
         const trustError = new Error(
-          'The authenticity of this host cannot be established.'
+          `The authenticity of ${String(errObj.host || host.address)} can't be established.`
         ) as SSHHostVerificationError;
         trustError.code = 'HOST_VERIFICATION_REQUIRED';
         trustError.fingerprint = String(errObj.fingerprint || '');
         trustError.host = String(errObj.host || host.address);
         trustError.port = Number(errObj.port || host.port);
+        throw trustError;
+      }
+
+      const verificationMessage =
+        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+      if (
+        typeof verificationMessage === 'string' &&
+        verificationMessage.includes("can't be established")
+      ) {
+        const trustError = new Error(verificationMessage) as SSHHostVerificationError;
+        trustError.code = 'HOST_VERIFICATION_REQUIRED';
+        trustError.fingerprint = '';
+        trustError.host = host.address;
+        trustError.port = host.port;
         throw trustError;
       }
 
@@ -58,17 +97,19 @@ class SSHService {
       const cleanedMessage = message
         .replace(/^Error invoking remote method 'ssh:connect':\s*/, '')
         .replace(/^Error invoking remote method 'ssh:connect':\s*/, ''); // double check for nesting
-      
+
       if (cleanedMessage === '[object Object]' || !cleanedMessage) {
         try {
           const stringified = JSON.stringify(error);
           if (stringified !== '{}' && stringified !== 'null') {
             message = stringified;
           } else {
-            message = 'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
+            message =
+              'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
           }
         } catch {
-          message = 'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
+          message =
+            'SSH connection failed (unspecified error). Please check your server settings, network connection, and credentials.';
         }
       } else {
         message = cleanedMessage;

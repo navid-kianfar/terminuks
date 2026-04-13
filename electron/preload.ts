@@ -21,6 +21,16 @@ interface HostConfig {
   passphrase?: string;
 }
 
+type SSHConnectResult =
+  | { success: true }
+  | {
+      success: false;
+      code: 'HOST_VERIFICATION_REQUIRED';
+      fingerprint: string;
+      host: string;
+      port: number;
+    };
+
 contextBridge.exposeInMainWorld('electron', {
   store: {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
@@ -39,15 +49,15 @@ contextBridge.exposeInMainWorld('electron', {
     home: () => ipcRenderer.invoke('localfs:home'),
   },
   ssh: {
-    connect: (hostConfig: HostConfig) => ipcRenderer.invoke('ssh:connect', hostConfig),
+    connect: (hostConfig: HostConfig): Promise<SSHConnectResult> =>
+      ipcRenderer.invoke('ssh:connect', hostConfig),
     trustHost: (hostConfig: HostConfig, fingerprint: string) =>
       ipcRenderer.invoke('ssh:trustHost', hostConfig, fingerprint),
     disconnect: (hostId: string) => ipcRenderer.invoke('ssh:disconnect', hostId),
     shell: (hostId: string) => ipcRenderer.invoke('ssh:shell', hostId),
     write: (hostId: string, streamId: string, data: string) =>
       ipcRenderer.invoke('ssh:write', hostId, streamId, data),
-    close: (hostId: string, streamId: string) =>
-      ipcRenderer.invoke('ssh:close', hostId, streamId),
+    close: (hostId: string, streamId: string) => ipcRenderer.invoke('ssh:close', hostId, streamId),
     onStreamData: (callback: (hostId: string, streamId: string, data: string) => void) => {
       const listener = (_: unknown, hostId: string, streamId: string, data: string) =>
         callback(hostId, streamId, data);
@@ -55,15 +65,16 @@ contextBridge.exposeInMainWorld('electron', {
       return () => ipcRenderer.removeListener('ssh:stream-data', listener);
     },
     onStreamClose: (callback: (hostId: string, streamId: string) => void) => {
-      const listener = (_: unknown, hostId: string, streamId: string) =>
-        callback(hostId, streamId);
+      const listener = (_: unknown, hostId: string, streamId: string) => callback(hostId, streamId);
       ipcRenderer.on('ssh:stream-close', listener);
       return () => ipcRenderer.removeListener('ssh:stream-close', listener);
     },
   },
   localShell: {
-    start: (options?: { cols?: number; rows?: number }) => ipcRenderer.invoke('localShell:start', options),
-    write: (streamId: string, data: string) => ipcRenderer.invoke('localShell:write', streamId, data),
+    start: (options?: { cols?: number; rows?: number }) =>
+      ipcRenderer.invoke('localShell:start', options),
+    write: (streamId: string, data: string) =>
+      ipcRenderer.invoke('localShell:write', streamId, data),
     resize: (streamId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('localShell:resize', streamId, cols, rows),
     close: (streamId: string) => ipcRenderer.invoke('localShell:close', streamId),
@@ -81,7 +92,8 @@ contextBridge.exposeInMainWorld('electron', {
   sftp: {
     connect: (hostConfig: HostConfig) => ipcRenderer.invoke('sftp:connect', hostConfig),
     disconnect: (hostId: string) => ipcRenderer.invoke('sftp:disconnect', hostId),
-    list: (hostId: string, remotePath: string) => ipcRenderer.invoke('sftp:list', hostId, remotePath),
+    list: (hostId: string, remotePath: string) =>
+      ipcRenderer.invoke('sftp:list', hostId, remotePath),
     download: (hostId: string, remotePath: string, localPath: string, transferId?: string) =>
       ipcRenderer.invoke('sftp:download', hostId, remotePath, localPath, transferId),
     upload: (hostId: string, localPath: string, remotePath: string, transferId?: string) =>

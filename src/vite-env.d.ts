@@ -21,6 +21,16 @@ interface ElectronHostConfig {
   passphrase?: string;
 }
 
+type ElectronSSHConnectResult =
+  | { success: true }
+  | {
+      success: false;
+      code: 'HOST_VERIFICATION_REQUIRED';
+      fingerprint: string;
+      host: string;
+      port: number;
+    };
+
 interface Window {
   electron?: {
     store: {
@@ -47,7 +57,7 @@ interface Window {
       home: () => Promise<string>;
     };
     ssh: {
-      connect: (hostConfig: ElectronHostConfig) => Promise<{ success: boolean }>;
+      connect: (hostConfig: ElectronHostConfig) => Promise<ElectronSSHConnectResult>;
       trustHost: (hostConfig: ElectronHostConfig, fingerprint: string) => Promise<void>;
       disconnect: (hostId: string) => Promise<void>;
       shell: (hostId: string) => Promise<{ streamId: string }>;
@@ -56,9 +66,7 @@ interface Window {
       onStreamData: (
         callback: (hostId: string, streamId: string, data: string) => void
       ) => () => void;
-      onStreamClose: (
-        callback: (hostId: string, streamId: string) => void
-      ) => () => void;
+      onStreamClose: (callback: (hostId: string, streamId: string) => void) => () => void;
     };
     localShell: {
       start: (options?: { cols?: number; rows?: number }) => Promise<{ streamId: string }>;
@@ -71,7 +79,10 @@ interface Window {
     sftp: {
       connect: (hostConfig: ElectronHostConfig) => Promise<{ success: boolean }>;
       disconnect: (hostId: string) => Promise<void>;
-      list: (hostId: string, remotePath: string) => Promise<
+      list: (
+        hostId: string,
+        remotePath: string
+      ) => Promise<
         Array<{
           name: string;
           type: string;
