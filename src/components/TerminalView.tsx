@@ -28,6 +28,7 @@ const TerminalView = ({ sessionId }: TerminalViewProps) => {
   const cleanupListenersRef = useRef<(() => void)[]>([]);
   const inputDisposableRef = useRef<IDisposable | null>(null);
   const streamIdRef = useRef<string | undefined>(undefined);
+  const pendingRemoteShellCloseRef = useRef<Promise<void> | null>(null);
   const localStreamIdRef = useRef<string | undefined>(undefined);
   const { getHost } = useHosts();
   const { settings, themes } = useTheme();
@@ -209,13 +210,50 @@ const TerminalView = ({ sessionId }: TerminalViewProps) => {
     [sessionId, setupMockTerminal, updateSession]
   );
 
+  const closeActiveRemoteShell = useCallback(
+    async (hostId: string | undefined) => {
+      if (!hostId) {
+        return;
+      }
+
+      const activeStreamId = streamIdRef.current;
+      if (!activeStreamId) {
+        if (pendingRemoteShellCloseRef.current) {
+          await pendingRemoteShellCloseRef.current;
+        }
+        return;
+      }
+
+      streamIdRef.current = undefined;
+      updateSession(sessionId, { streamId: undefined });
+
+      const closePromise = sshService
+        .closeShell(hostId, activeStreamId)
+        .catch(() => undefined)
+        .finally(() => {
+          if (pendingRemoteShellCloseRef.current === closePromise) {
+            pendingRemoteShellCloseRef.current = null;
+          }
+        });
+
+      pendingRemoteShellCloseRef.current = closePromise;
+      await closePromise;
+    },
+    [sessionId, updateSession]
+  );
+
   const connectSSH = useCallback(
     async (terminal: XTerm, nextHost: NonNullable<typeof host>) => {
+      if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
       cleanupListenersRef.current.forEach((cleanup) => cleanup());
       cleanupListenersRef.current = [];
       inputDisposableRef.current?.dispose();
       inputDisposableRef.current = null;
-      streamIdRef.current = undefined;
+      await closeActiveRemoteShell(sessionHostId ?? nextHost.id);
       window.dispatchEvent(new CustomEvent('terminuks:collapse-sidebar'));
       updateSession(sessionId, { status: 'connecting', lastError: undefined, streamId: undefined });
       setSessionStatus('connecting');
@@ -377,7 +415,14 @@ const TerminalView = ({ sessionId }: TerminalViewProps) => {
         setupMockTerminal(terminal);
       }
     },
-    [sessionId, updateSession, setupMockTerminal, appendConnectionLog]
+    [
+      appendConnectionLog,
+      closeActiveRemoteShell,
+      sessionHostId,
+      sessionId,
+      setupMockTerminal,
+      updateSession,
+    ]
   );
 
   useEffect(() => {
@@ -493,9 +538,12 @@ const TerminalView = ({ sessionId }: TerminalViewProps) => {
       cleanupListenersRef.current = [];
       if (reconnectTimeoutRef.current) {
         window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
+      void closeActiveRemoteShell(sessionHostId ?? host?.id);
       if (localStreamIdRef.current && window.electron) {
         window.electron.localShell.close(localStreamIdRef.current).catch(() => undefined);
+        localStreamIdRef.current = undefined;
       }
       terminalRef.current?.removeEventListener('mousedown', focusTerminal);
       window.removeEventListener('resize', handleResize);
@@ -507,6 +555,7 @@ const TerminalView = ({ sessionId }: TerminalViewProps) => {
     sessionType,
     sessionHostId,
     host,
+    closeActiveRemoteShell,
     connectSSH,
     connectLocalShell,
     updateSession,

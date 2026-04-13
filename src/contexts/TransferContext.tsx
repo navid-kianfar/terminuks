@@ -12,6 +12,8 @@ export interface TransferTask {
   localPath: string;
   error?: string;
   startTime?: number;
+  refreshLocalPath?: string;
+  refreshRemotePath?: string;
 }
 
 interface TransferContextType {

@@ -54,6 +54,10 @@ contextBridge.exposeInMainWorld('electron', {
     createDirectory: (dirPath: string) => ipcRenderer.invoke('localfs:createDirectory', dirPath),
     rename: (oldPath: string, newPath: string) =>
       ipcRenderer.invoke('localfs:rename', oldPath, newPath),
+    delete: (targetPaths: string[]) => ipcRenderer.invoke('localfs:delete', targetPaths),
+    compress: (basePath: string, names: string[], archiveName: string) =>
+      ipcRenderer.invoke('localfs:compress', basePath, names, archiveName),
+    decompress: (filePath: string) => ipcRenderer.invoke('localfs:decompress', filePath),
   },
   ssh: {
     connect: (hostConfig: HostConfig): Promise<SSHConnectResult> =>

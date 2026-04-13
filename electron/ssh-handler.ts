@@ -246,6 +246,63 @@ ipcMain.handle('ssh:close', async (_, hostId: string, streamId: string) => {
     return;
   }
 
-  stream.end('exit\n');
-  connection.streams.delete(streamId);
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let closeTimeout: NodeJS.Timeout | null = null;
+
+    const finalize = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (closeTimeout) {
+        clearTimeout(closeTimeout);
+      }
+      stream.removeListener('close', finalize);
+      stream.removeListener('end', finalize);
+      stream.removeListener('error', finalize);
+      connection.streams.delete(streamId);
+      resolve();
+    };
+
+    stream.once('close', finalize);
+    stream.once('end', finalize);
+    stream.once('error', finalize);
+
+    closeTimeout = setTimeout(() => {
+      try {
+        if (typeof stream.destroy === 'function') {
+          stream.destroy();
+        }
+      } catch {
+        // Ignore forced cleanup failures.
+      }
+      finalize();
+    }, 1000);
+
+    try {
+      if (typeof stream.write === 'function' && !stream.destroyed) {
+        stream.write('exit\n');
+      }
+    } catch {
+      // Ignore write failures while closing the channel.
+    }
+
+    try {
+      if (typeof stream.end === 'function') {
+        stream.end();
+      }
+    } catch {
+      // Ignore end failures while closing the channel.
+    }
+
+    try {
+      if (typeof stream.close === 'function') {
+        stream.close();
+      }
+    } catch {
+      // Ignore channel close failures while cleaning up.
+    }
+  });
 });

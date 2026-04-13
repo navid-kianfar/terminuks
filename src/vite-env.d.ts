@@ -60,6 +60,9 @@ interface Window {
       createFile: (filePath: string) => Promise<void>;
       createDirectory: (dirPath: string) => Promise<void>;
       rename: (oldPath: string, newPath: string) => Promise<void>;
+      delete: (targetPaths: string[]) => Promise<void>;
+      compress: (basePath: string, names: string[], archiveName: string) => Promise<string>;
+      decompress: (filePath: string) => Promise<string>;
     };
     ssh: {
       connect: (hostConfig: ElectronHostConfig) => Promise<ElectronSSHConnectResult>;

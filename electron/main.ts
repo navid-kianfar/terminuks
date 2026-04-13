@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, safeStorage } from 'electron';
+import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { promisify } from 'util';
 import initSqlJs from 'sql.js';
 import './ssh-handler';
 import './sftp-handler';
@@ -121,6 +123,34 @@ let mainWindow: BrowserWindow | null = null;
 let store: EncryptedSqliteStore;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 const isDevelopment = !app.isPackaged || process.env.NODE_ENV === 'development';
+const execFileAsync = promisify(execFile);
+
+const getCompressedFileKind = (name: string) => {
+  const normalized = name.toLowerCase();
+
+  if (normalized.endsWith('.tar.gz') || normalized.endsWith('.tgz')) {
+    return 'tar.gz';
+  }
+  if (normalized.endsWith('.tar')) {
+    return 'tar';
+  }
+  if (normalized.endsWith('.zip')) {
+    return 'zip';
+  }
+  if (normalized.endsWith('.gz')) {
+    return 'gz';
+  }
+
+  return null;
+};
+
+const runLocalCommand = async (command: string, args: string[], cwd: string) => {
+  try {
+    return await execFileAsync(command, args, { cwd });
+  } catch (error: any) {
+    throw new Error(error?.stderr?.trim() || error?.message || 'Local command failed');
+  }
+};
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -243,4 +273,48 @@ ipcMain.handle('localfs:createDirectory', async (_, dirPath: string) => {
 
 ipcMain.handle('localfs:rename', async (_, oldPath: string, newPath: string) => {
   await fs.promises.rename(oldPath, newPath);
+});
+
+ipcMain.handle('localfs:delete', async (_, targetPaths: string[]) => {
+  for (const targetPath of targetPaths) {
+    await fs.promises.rm(targetPath, { recursive: true, force: false });
+  }
+});
+
+ipcMain.handle(
+  'localfs:compress',
+  async (_, basePath: string, names: string[], archiveName: string) => {
+    if (names.length === 0) {
+      throw new Error('No files selected for compression');
+    }
+
+    await runLocalCommand('tar', ['-czf', archiveName, '--', ...names], basePath);
+    return path.join(basePath, archiveName);
+  }
+);
+
+ipcMain.handle('localfs:decompress', async (_, filePath: string) => {
+  const cwd = path.dirname(filePath);
+  const fileName = path.basename(filePath);
+  const kind = getCompressedFileKind(fileName);
+
+  if (!kind) {
+    throw new Error('Unsupported compressed file type');
+  }
+
+  if (kind === 'tar.gz') {
+    await runLocalCommand('tar', ['-xzf', fileName], cwd);
+  } else if (kind === 'tar') {
+    await runLocalCommand('tar', ['-xf', fileName], cwd);
+  } else if (kind === 'zip') {
+    if (process.platform === 'win32') {
+      await runLocalCommand('tar', ['-xf', fileName], cwd);
+    } else {
+      await runLocalCommand('unzip', ['-oq', fileName], cwd);
+    }
+  } else {
+    await runLocalCommand('gunzip', ['-kf', fileName], cwd);
+  }
+
+  return cwd;
 });

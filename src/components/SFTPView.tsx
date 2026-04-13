@@ -63,7 +63,8 @@ type DialogMode =
   | 'create-local-folder'
   | 'rename-remote'
   | 'rename-local'
-  | 'delete-remote';
+  | 'delete-remote'
+  | 'delete-local';
 
 interface ContextMenuState {
   pane: PaneType;
@@ -234,6 +235,11 @@ const buildRemoteDecompressCommand = (archiveName: string) => {
 
   return `gunzip -kf ${quotedArchive}`;
 };
+
+const buildDeleteMessage = (targetPaths: string[]) =>
+  targetPaths.length > 1
+    ? `Delete ${targetPaths.length} selected items?`
+    : `Delete ${targetPaths[0]?.split(/[\\/]/).pop() || 'this item'}?`;
 
 export const DualPaneSFTPWorkspace = ({
   host,
@@ -426,6 +432,8 @@ export const DualPaneSFTPWorkspace = ({
           hostId: string;
           remotePath: string;
           localPath: string;
+          refreshLocalPath?: string;
+          refreshRemotePath?: string;
         }>
       ).detail;
 
@@ -437,7 +445,7 @@ export const DualPaneSFTPWorkspace = ({
         detail.type === 'upload' &&
         host &&
         detail.hostId === host.id &&
-        getRemoteParentPath(detail.remotePath) === currentRemotePath
+        detail.refreshRemotePath === currentRemotePath
       ) {
         loadRemoteFiles(currentRemotePath);
       }
@@ -445,7 +453,7 @@ export const DualPaneSFTPWorkspace = ({
       if (
         detail.type === 'download' &&
         currentLocalPath &&
-        getLocalParentPath(detail.localPath) === currentLocalPath
+        detail.refreshLocalPath === currentLocalPath
       ) {
         loadLocalFiles(currentLocalPath);
       }
@@ -677,6 +685,7 @@ export const DualPaneSFTPWorkspace = ({
             hostId: host.id,
             remotePath: remoteTargetPath,
             localPath: entry.path,
+            refreshRemotePath: currentRemotePath,
           });
           fileCount += 1;
         };
@@ -739,6 +748,7 @@ export const DualPaneSFTPWorkspace = ({
               hostId: host.id,
               remotePath: onlyEntryPath,
               localPath: result.filePath,
+              refreshLocalPath: getLocalParentPath(result.filePath),
             });
             setFeedback(summarizeTransferQueue('download', 1, 0));
             return;
@@ -798,6 +808,7 @@ export const DualPaneSFTPWorkspace = ({
             hostId: host.id,
             remotePath,
             localPath: localTargetPath,
+            refreshLocalPath: resolvedTargetDirectory,
           });
           fileCount += 1;
         };
@@ -1032,6 +1043,40 @@ export const DualPaneSFTPWorkspace = ({
     }
   };
 
+  const confirmDeleteLocal = async () => {
+    if (!window.electron || itemsToDelete.length === 0) {
+      return;
+    }
+
+    try {
+      await window.electron.localfs.delete(itemsToDelete);
+
+      if (editorPane === 'local' && editorPath && itemsToDelete.includes(editorPath)) {
+        setEditorPath(null);
+        setEditorPane(null);
+        setEditorContent('');
+        setEditorDirty(false);
+      }
+
+      setSelectedLocalPaths([]);
+      setFeedback(
+        itemsToDelete.length === 1
+          ? 'Local item deleted'
+          : `${itemsToDelete.length} local items deleted`
+      );
+
+      if (currentLocalPath) {
+        await loadLocalFiles(currentLocalPath);
+      }
+    } catch (deleteError: unknown) {
+      const message = deleteError instanceof Error ? deleteError.message : 'Unknown delete error';
+      setError(`Delete failed: ${message}`);
+    } finally {
+      setItemsToDelete([]);
+      setDialogMode(null);
+    }
+  };
+
   const compressRemoteEntries = useCallback(
     async (entries: RemoteFileItem[]) => {
       if (!host || entries.length === 0) {
@@ -1058,6 +1103,31 @@ export const DualPaneSFTPWorkspace = ({
       }
     },
     [currentRemotePath, host, loadRemoteFiles]
+  );
+
+  const compressLocalEntries = useCallback(
+    async (entries: LocalFileItem[]) => {
+      if (!window.electron || !currentLocalPath || entries.length === 0) {
+        return;
+      }
+
+      try {
+        setError(null);
+        const archiveName = getArchiveName(entries.map((entry) => entry.name));
+        const archivePath = await window.electron.localfs.compress(
+          currentLocalPath,
+          entries.map((entry) => entry.name),
+          archiveName
+        );
+        setFeedback(`Created archive ${archiveName}`);
+        await loadLocalFiles(currentLocalPath, [archivePath]);
+      } catch (compressError: unknown) {
+        const message =
+          compressError instanceof Error ? compressError.message : 'Unknown compression error';
+        setError(`Compress failed: ${message}`);
+      }
+    },
+    [currentLocalPath, loadLocalFiles]
   );
 
   const decompressRemoteEntry = useCallback(
@@ -1087,6 +1157,33 @@ export const DualPaneSFTPWorkspace = ({
       }
     },
     [currentRemotePath, host, loadRemoteFiles]
+  );
+
+  const decompressLocalEntry = useCallback(
+    async (entry: LocalFileItem) => {
+      if (!window.electron || !currentLocalPath) {
+        return;
+      }
+
+      if (!getCompressedFileKind(entry.name)) {
+        setError('Decompress is only available for supported compressed files.');
+        return;
+      }
+
+      try {
+        setError(null);
+        await window.electron.localfs.decompress(entry.path);
+        setFeedback(`Decompressed ${entry.name}`);
+        await loadLocalFiles(currentLocalPath);
+      } catch (decompressError: unknown) {
+        const message =
+          decompressError instanceof Error
+            ? decompressError.message
+            : 'Unknown decompression error';
+        setError(`Decompress failed: ${message}`);
+      }
+    },
+    [currentLocalPath, loadLocalFiles]
   );
 
   const openContextMenu = (
@@ -1590,6 +1687,34 @@ export const DualPaneSFTPWorkspace = ({
                   <span>{contextLocalEntries.length > 1 ? 'Upload Selected' : 'Upload'}</span>
                 </button>
               )}
+              {contextLocalEntries.length > 0 && (
+                <button
+                  type="button"
+                  className="sftp-context-item"
+                  onClick={() => {
+                    compressLocalEntries(contextLocalEntries);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Archive size={14} />
+                  <span>{contextLocalEntries.length > 1 ? 'Compress Selected' : 'Compress'}</span>
+                </button>
+              )}
+              {contextLocalEntries.length === 1 &&
+                contextLocalEntries[0].type === 'file' &&
+                getCompressedFileKind(contextLocalEntries[0].name) && (
+                  <button
+                    type="button"
+                    className="sftp-context-item"
+                    onClick={() => {
+                      decompressLocalEntry(contextLocalEntries[0]);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <PackageOpen size={14} />
+                    <span>Decompress</span>
+                  </button>
+                )}
               <button
                 type="button"
                 className="sftp-context-item"
@@ -1628,17 +1753,26 @@ export const DualPaneSFTPWorkspace = ({
                 <FolderPlus size={14} />
                 <span>New Folder</span>
               </button>
-              <button
-                type="button"
-                className="sftp-context-item"
-                onClick={() => {
-                  chooseLocalDirectory();
-                  setContextMenu(null);
-                }}
-              >
-                <HardDrive size={14} />
-                <span>Choose Local Folder</span>
-              </button>
+              {contextLocalEntries.length > 0 && (
+                <button
+                  type="button"
+                  className="sftp-context-item danger"
+                  onClick={() => {
+                    const paths =
+                      contextMenu.itemPath && selectedLocalPaths.includes(contextMenu.itemPath)
+                        ? [...selectedLocalPaths]
+                        : contextMenu.itemPath
+                          ? [contextMenu.itemPath]
+                          : [];
+                    setItemsToDelete(paths);
+                    setDialogMode('delete-local');
+                    setContextMenu(null);
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <span>{contextLocalEntries.length > 1 ? 'Delete Selected' : 'Delete'}</span>
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -1977,20 +2111,20 @@ export const DualPaneSFTPWorkspace = ({
       )}
 
       <AlertDialog
-        open={dialogMode === 'delete-remote'}
-        title="Delete Remote Item"
-        description="This permanently removes the selected remote file or folder."
+        open={dialogMode === 'delete-remote' || dialogMode === 'delete-local'}
+        title={dialogMode === 'delete-local' ? 'Delete Local Item' : 'Delete Remote Item'}
+        description={
+          dialogMode === 'delete-local'
+            ? 'This permanently removes the selected local file or folder.'
+            : 'This permanently removes the selected remote file or folder.'
+        }
         onClose={() => {
           setDialogMode(null);
           setItemsToDelete([]);
         }}
-        onConfirm={confirmDeleteRemote}
+        onConfirm={dialogMode === 'delete-local' ? confirmDeleteLocal : confirmDeleteRemote}
       >
-        <p>
-          {itemsToDelete.length > 1
-            ? `Delete ${itemsToDelete.length} selected items?`
-            : `Delete ${itemsToDelete[0]?.split('/').pop() || 'this remote item'}?`}
-        </p>
+        <p>{buildDeleteMessage(itemsToDelete)}</p>
       </AlertDialog>
 
       {hostPickerEnabled && showHostPicker && (
